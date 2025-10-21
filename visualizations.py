@@ -3,14 +3,15 @@ Visualization module for Smart Speaker Conversation Analysis Platform
 Handles all chart generation using Plotly
 """
 
+import base64
+import io
+from typing import Optional
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from typing import Optional
 from wordcloud import WordCloud
-import matplotlib.pyplot as plt
-import io
-import base64
 
 
 class Visualizer:

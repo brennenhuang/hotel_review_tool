@@ -3,10 +3,11 @@ Data processor module for Smart Speaker Conversation Analysis Platform
 Handles data loading, column mapping, and transformations
 """
 
+from datetime import datetime, time, timedelta
+from typing import List, Optional, Tuple
+
 import pandas as pd
 import pytz
-from datetime import datetime, timedelta, time
-from typing import List, Tuple, Optional
 
 
 class DataProcessor:
@@ -294,6 +295,46 @@ class DataProcessor:
             ("America/Los_Angeles", "UTC-8/-7 (洛杉磯時間)"),
         ]
         return common_timezones
+
+    def get_timezone_info(self, timezone_id: str) -> str:
+        """
+        獲取時區的夏令時狀態信息（最小版本）
+
+        Args:
+            timezone_id: 時區ID (如 'America/New_York')
+
+        Returns:
+            時區狀態字符串
+        """
+        try:
+            import pytz
+            from datetime import datetime
+
+            if timezone_id in [
+                "UTC",
+                "Asia/Taipei",
+                "Asia/Shanghai",
+                "Asia/Hong_Kong",
+                "Asia/Singapore",
+            ]:
+                return ""  # 這些時區不使用夏令時，不需要額外信息
+
+            tz = pytz.timezone(timezone_id)
+            now = datetime.now(tz)
+
+            # 獲取當前UTC偏移量
+            utc_offset = now.strftime("%z")
+            utc_offset_formatted = f"{utc_offset[:3]}:{utc_offset[3:]}"
+
+            # 判斷是否為夏令時
+            is_dst = bool(now.dst())
+            dst_emoji = "🌞" if is_dst else "❄️"
+            dst_status = "夏令時" if is_dst else "標準時間"
+
+            return f"\n當前: UTC{utc_offset_formatted} ({dst_emoji}{dst_status})"
+
+        except Exception:
+            return ""
 
     def convert_timezone(
         self, source_timezone: str = "Asia/Taipei", target_timezone: str = "UTC"

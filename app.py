@@ -3,12 +3,13 @@ Main Streamlit application for Smart Speaker Conversation Analysis Platform
 智能音箱對話分析平台
 """
 
-import streamlit as st
 from datetime import datetime
-from data_processor import DataProcessor
-from visualizations import Visualizer
-from export_manager import ExportManager
 
+import streamlit as st
+
+from data_processor import DataProcessor
+from export_manager import ExportManager
+from visualizations import Visualizer
 
 # Page configuration
 st.set_page_config(
@@ -338,15 +339,27 @@ def dashboard_page():
                 display_name: tz_id for tz_id, display_name in available_timezones
             }
 
+            # 生成動態help文本
+            base_help = (
+                "選擇報告中顯示的時區。數據原始時區為UTC+8，選擇UTC將轉換為協調世界時。"
+            )
+
             selected_timezone_display = st.selectbox(
                 "🌍 選擇時區",
                 options=list(timezone_options.keys()),
                 index=0,  # Default to first option (UTC)
                 key="target_timezone",
-                help="選擇報告中顯示的時區。數據原始時區為UTC+8，選擇UTC將轉換為協調世界時。",
+                help=base_help,
             )
 
             selected_timezone = timezone_options[selected_timezone_display]
+
+            # 顯示當前選擇時區的狀態信息
+            timezone_status = st.session_state.data_processor.get_timezone_info(
+                selected_timezone
+            )
+            if timezone_status:
+                st.caption(f"⏰ **時區狀態:** {timezone_status.strip()}")
 
         # Show timezone info if different timezone is selected
         if selected_timezone != "Asia/Taipei" and st.session_state.data_loaded:
