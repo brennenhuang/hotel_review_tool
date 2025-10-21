@@ -354,9 +354,28 @@ def dashboard_page():
 
             selected_timezone = timezone_options[selected_timezone_display]
 
+            # 檢查是否為有夏令時的時區
+            has_dst = selected_timezone in [
+                "America/New_York",
+                "America/Los_Angeles",
+                "Europe/London",
+            ]
+
+            # 添加夏令時強制選擇選項（僅對有夏令時的時區顯示）
+            dst_override = None
+            if has_dst:
+                dst_override = st.radio(
+                    "⏰ 時間模式",
+                    options=["自動", "強制夏令時", "強制標準時間"],
+                    index=0,
+                    key="dst_override",
+                    help="自動：根據當前日期判斷；強制：手動指定使用夏令時還是標準時間",
+                    horizontal=True,
+                )
+
             # 顯示當前選擇時區的狀態信息
             timezone_status = st.session_state.data_processor.get_timezone_info(
-                selected_timezone
+                selected_timezone, dst_override
             )
             if timezone_status:
                 st.caption(f"⏰ **時區狀態:** {timezone_status.strip()}")
@@ -390,6 +409,7 @@ def dashboard_page():
                         converted_df = st.session_state.data_processor.convert_timezone(
                             source_timezone="Asia/Taipei",  # Original data timezone (UTC+8)
                             target_timezone=selected_timezone,
+                            dst_override=dst_override,
                         )
                         if converted_df is not None:
                             export_df = converted_df
@@ -413,6 +433,7 @@ def dashboard_page():
                             if selected_timezone != "Asia/Taipei"
                             else None
                         ),
+                        dst_override=dst_override,
                     )
 
                     st.success(

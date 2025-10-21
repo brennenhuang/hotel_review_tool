@@ -296,12 +296,13 @@ class DataProcessor:
         ]
         return common_timezones
 
-    def get_timezone_info(self, timezone_id: str) -> str:
+    def get_timezone_info(self, timezone_id: str, dst_override: str = None) -> str:
         """
-        獲取時區的夏令時狀態信息（最小版本）
+        獲取時區的夏令時狀態信息
 
         Args:
             timezone_id: 時區ID (如 'America/New_York')
+            dst_override: 強制選擇模式 ("自動", "強制夏令時", "強制標準時間")
 
         Returns:
             時區狀態字符串
@@ -322,22 +323,83 @@ class DataProcessor:
             tz = pytz.timezone(timezone_id)
             now = datetime.now(tz)
 
-            # 獲取當前UTC偏移量
-            utc_offset = now.strftime("%z")
-            utc_offset_formatted = f"{utc_offset[:3]}:{utc_offset[3:]}"
+            # 確定是否使用夏令時
+            if dst_override == "強制夏令時":
+                is_dst = True
+                mode_indicator = "(強制)"
+            elif dst_override == "強制標準時間":
+                is_dst = False
+                mode_indicator = "(強制)"
+            else:  # 自動模式
+                is_dst = bool(now.dst())
+                mode_indicator = "(自動)"
 
-            # 判斷是否為夏令時
-            is_dst = bool(now.dst())
+            # 計算對應的UTC偏移量
+            if dst_override in ["強制夏令時", "強制標準時間"]:
+                # 強制模式：計算對應的偏移量
+                utc_offset_formatted = self._calculate_forced_offset(
+                    timezone_id, is_dst
+                )
+            else:
+                # 自動模式：使用當前偏移量
+                utc_offset = now.strftime("%z")
+                utc_offset_formatted = f"{utc_offset[:3]}:{utc_offset[3:]}"
+
             dst_emoji = "🌞" if is_dst else "❄️"
             dst_status = "夏令時" if is_dst else "標準時間"
 
-            return f"\n當前: UTC{utc_offset_formatted} ({dst_emoji}{dst_status})"
+            return f"\n{dst_status}: UTC{utc_offset_formatted} {mode_indicator}"
 
         except Exception:
             return ""
 
+    def _calculate_forced_offset(self, timezone_id: str, force_dst: bool) -> str:
+        """
+        計算強制模式下的UTC偏移量
+
+        Args:
+            timezone_id: 時區ID
+            force_dst: 是否強制夏令時
+
+        Returns:
+            格式化的UTC偏移量字符串
+        """
+        # 常見時區的標準時間和夏令時偏移量
+        timezone_offsets = {
+            "America/New_York": {False: "-05:00", True: "-04:00"},  # EST/EDT
+            "America/Los_Angeles": {False: "-08:00", True: "-07:00"},  # PST/PDT
+            "Europe/London": {False: "+00:00", True: "+01:00"},  # GMT/BST
+        }
+
+        if timezone_id in timezone_offsets:
+            return timezone_offsets[timezone_id][force_dst]
+        else:
+            # 對於其他時區，嘗試動態計算
+            try:
+                import pytz
+                from datetime import datetime
+
+                tz = pytz.timezone(timezone_id)
+
+                # 使用一個已知的夏令時日期和標準時間日期來計算偏移量
+                summer_date = datetime(2024, 7, 15, 12, 0, 0)  # 夏季日期
+                winter_date = datetime(2024, 1, 15, 12, 0, 0)  # 冬季日期
+
+                if force_dst:
+                    test_dt = tz.localize(summer_date)
+                else:
+                    test_dt = tz.localize(winter_date)
+
+                offset = test_dt.strftime("%z")
+                return f"{offset[:3]}:{offset[3:]}"
+            except Exception:
+                return "+00:00"  # 默認值
+
     def convert_timezone(
-        self, source_timezone: str = "Asia/Taipei", target_timezone: str = "UTC"
+        self,
+        source_timezone: str = "Asia/Taipei",
+        target_timezone: str = "UTC",
+        dst_override: str = None,
     ) -> Optional[pd.DataFrame]:
         """
         Convert timestamps from source timezone to target timezone
@@ -345,6 +407,7 @@ class DataProcessor:
         Args:
             source_timezone: Source timezone (default: Asia/Taipei for UTC+8)
             target_timezone: Target timezone for conversion
+            dst_override: 強制選擇模式 ("自動", "強制夏令時", "強制標準時間")
 
         Returns:
             DataFrame with converted timestamps, or None if no data
@@ -359,10 +422,11 @@ class DataProcessor:
             source_tz = pytz.timezone(source_timezone)
             target_tz = pytz.timezone(target_timezone)
 
-            # Convert timestamps
-            # First, assume the timestamps are naive and in source timezone
+            # Convert timestamps with DST override consideration
             df_converted["request_timestamp"] = df_converted["request_timestamp"].apply(
-                lambda x: self._convert_single_timestamp(x, source_tz, target_tz)
+                lambda x: self._convert_single_timestamp_with_override(
+                    x, source_tz, target_tz, dst_override
+                )
             )
 
             return df_converted
@@ -402,6 +466,108 @@ class DataProcessor:
 
         except Exception as e:
             print(f"Single timestamp conversion error: {e}")
+            return timestamp
+
+    def _convert_single_timestamp_with_override(
+        self, timestamp, source_tz, target_tz, dst_override
+    ) -> datetime:
+        """
+        Convert a single timestamp between timezones with DST override support
+
+        Args:
+            timestamp: Input timestamp
+            source_tz: Source timezone object
+            target_tz: Target timezone object
+            dst_override: 強制選擇模式 ("自動", "強制夏令時", "強制標準時間")
+
+        Returns:
+            Converted timestamp
+        """
+        if pd.isna(timestamp):
+            return timestamp
+
+        try:
+            # First do normal conversion
+            normal_converted = self._convert_single_timestamp(
+                timestamp, source_tz, target_tz
+            )
+
+            # If no override or auto mode, return normal conversion
+            if not dst_override or dst_override == "自動":
+                return normal_converted
+
+            # For forced modes, calculate the adjustment
+            target_tz_name = str(target_tz)
+
+            # Only apply adjustment for DST-capable timezones
+            if target_tz_name in [
+                "America/New_York",
+                "America/Los_Angeles",
+                "Europe/London",
+            ]:
+                # Get what the timezone would be in both DST and standard time
+                summer_test = datetime(
+                    timestamp.year,
+                    7,
+                    15,
+                    timestamp.hour,
+                    timestamp.minute,
+                    timestamp.second,
+                )
+                winter_test = datetime(
+                    timestamp.year,
+                    1,
+                    15,
+                    timestamp.hour,
+                    timestamp.minute,
+                    timestamp.second,
+                )
+
+                try:
+                    # Localize test times to source timezone
+                    summer_source = source_tz.localize(summer_test)
+                    winter_source = source_tz.localize(winter_test)
+
+                    # Convert to target timezone
+                    summer_target = summer_source.astimezone(target_tz).replace(
+                        tzinfo=None
+                    )
+                    winter_target = winter_source.astimezone(target_tz).replace(
+                        tzinfo=None
+                    )
+
+                    # Calculate DST offset (difference between summer and winter)
+                    dst_offset = (summer_target.hour - winter_target.hour) % 24
+
+                    if dst_override == "強制夏令時":
+                        # If we want DST but currently have standard time
+                        test_localized = source_tz.localize(
+                            timestamp.replace(tzinfo=None)
+                        )
+                        test_converted = test_localized.astimezone(target_tz)
+                        is_currently_dst = bool(test_converted.dst())
+
+                        if not is_currently_dst and dst_offset > 0:
+                            return normal_converted + timedelta(hours=dst_offset)
+
+                    elif dst_override == "強制標準時間":
+                        # If we want standard time but currently have DST
+                        test_localized = source_tz.localize(
+                            timestamp.replace(tzinfo=None)
+                        )
+                        test_converted = test_localized.astimezone(target_tz)
+                        is_currently_dst = bool(test_converted.dst())
+
+                        if is_currently_dst and dst_offset > 0:
+                            return normal_converted - timedelta(hours=dst_offset)
+
+                except Exception:
+                    pass
+
+            return normal_converted
+
+        except Exception as e:
+            print(f"Single timestamp conversion with override error: {e}")
             return timestamp
 
     def convert_time_to_timezone(
