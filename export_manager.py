@@ -1,0 +1,254 @@
+"""
+Export manager module for Smart Speaker Conversation Analysis Platform
+Handles conversation export with stay session segmentation
+"""
+
+import pandas as pd
+from datetime import datetime, time, timedelta
+from typing import List, Dict, Tuple
+
+
+class ExportManager:
+    """Manage data export with intelligent stay session segmentation"""
+
+    def __init__(self):
+        pass
+
+    def segment_by_stay_sessions(self,
+                                  df: pd.DataFrame,
+                                  checkin_time_str: str,
+                                  checkout_time_str: str) -> List[Dict]:
+        """
+        Segment conversations by stay sessions
+
+        Args:
+            df: Filtered DataFrame with conversation data
+            checkin_time_str: Standard check-in time (e.g., "14:00")
+            checkout_time_str: Standard check-out time (e.g., "11:00")
+
+        Returns:
+            List of stay session dictionaries
+        """
+        if df.empty:
+            return []
+
+        # Parse check-in and check-out times
+        checkin_time = datetime.strptime(checkin_time_str, "%H:%M").time()
+        checkout_time = datetime.strptime(checkout_time_str, "%H:%M").time()
+
+        # Sort by hotel, room, and timestamp
+        df_sorted = df.sort_values(['hotel_name', 'room_name', 'request_timestamp']).copy()
+
+        sessions = []
+
+        # Group by hotel and room
+        for (hotel, room), group_df in df_sorted.groupby(['hotel_name', 'room_name']):
+            # Process each room's conversations
+            room_sessions = self._segment_room_conversations(
+                group_df,
+                hotel,
+                room,
+                checkin_time,
+                checkout_time
+            )
+            sessions.extend(room_sessions)
+
+        return sessions
+
+    def _segment_room_conversations(self,
+                                     room_df: pd.DataFrame,
+                                     hotel: str,
+                                     room: str,
+                                     checkin_time: time,
+                                     checkout_time: time) -> List[Dict]:
+        """
+        Segment conversations for a single room into stay sessions
+
+        Args:
+            room_df: DataFrame of conversations for one room
+            hotel: Hotel name
+            room: Room name
+            checkin_time: Standard check-in time
+            checkout_time: Standard check-out time
+
+        Returns:
+            List of stay session dictionaries
+        """
+        sessions = []
+        current_session = None
+        current_conversations = []
+
+        for _, row in room_df.iterrows():
+            timestamp = row['request_timestamp']
+
+            # Determine if this conversation belongs to current session or starts a new one
+            if current_session is None:
+                # Start first session
+                current_session = self._create_session_boundaries(timestamp, checkin_time, checkout_time)
+                current_conversations = [row]
+            elif self._is_in_session(timestamp, current_session):
+                # Add to current session
+                current_conversations.append(row)
+            else:
+                # Save current session and start new one
+                if current_conversations:
+                    sessions.append({
+                        'hotel': hotel,
+                        'room': room,
+                        'start_time': current_session['start'],
+                        'end_time': current_session['end'],
+                        'conversations': current_conversations
+                    })
+
+                # Start new session
+                current_session = self._create_session_boundaries(timestamp, checkin_time, checkout_time)
+                current_conversations = [row]
+
+        # Don't forget the last session
+        if current_conversations:
+            sessions.append({
+                'hotel': hotel,
+                'room': room,
+                'start_time': current_session['start'],
+                'end_time': current_session['end'],
+                'conversations': current_conversations
+            })
+
+        return sessions
+
+    def _create_session_boundaries(self,
+                                    timestamp: datetime,
+                                    checkin_time: time,
+                                    checkout_time: time) -> Dict:
+        """
+        Create session boundaries based on a timestamp
+
+        Args:
+            timestamp: A conversation timestamp
+            checkin_time: Standard check-in time
+            checkout_time: Standard check-out time
+
+        Returns:
+            Dictionary with 'start' and 'end' datetime
+        """
+        # Find the check-in date for this conversation
+        conversation_time = timestamp.time()
+
+        if conversation_time >= checkin_time:
+            # Conversation after check-in time - belongs to session starting today
+            checkin_datetime = datetime.combine(timestamp.date(), checkin_time)
+        else:
+            # Conversation before check-in time - belongs to session starting yesterday
+            checkin_datetime = datetime.combine(timestamp.date() - timedelta(days=1), checkin_time)
+
+        # Calculate check-out datetime
+        if checkout_time <= checkin_time:
+            # Check-out is next day (e.g., check-in 14:00, check-out 11:00)
+            checkout_datetime = datetime.combine(checkin_datetime.date() + timedelta(days=1), checkout_time)
+        else:
+            # Check-out is same day (unusual but possible)
+            checkout_datetime = datetime.combine(checkin_datetime.date(), checkout_time)
+
+        return {
+            'start': checkin_datetime,
+            'end': checkout_datetime
+        }
+
+    def _is_in_session(self, timestamp: datetime, session: Dict) -> bool:
+        """
+        Check if a timestamp falls within a session
+
+        Args:
+            timestamp: Conversation timestamp
+            session: Session dictionary with 'start' and 'end'
+
+        Returns:
+            True if timestamp is in session, False otherwise
+        """
+        return session['start'] <= timestamp < session['end']
+
+    def generate_export_text(self, sessions: List[Dict], export_date: str = None) -> str:
+        """
+        Generate formatted text report from stay sessions
+
+        Args:
+            sessions: List of stay session dictionaries
+            export_date: Export date string (defaults to today)
+
+        Returns:
+            Formatted text report
+        """
+        if not export_date:
+            export_date = datetime.now().strftime('%Y-%m-%d')
+
+        # Header
+        lines = [
+            f"智能音箱對話分析報告",
+            f"導出日期：{export_date}",
+            f"總共 {len(sessions)} 個住宿時段",
+            "=" * 80,
+            ""
+        ]
+
+        # Add each session
+        for i, session in enumerate(sessions, 1):
+            hotel = session['hotel']
+            room = session['room']
+            start_time = session['start_time'].strftime('%Y-%m-%d %H:%M')
+            end_time = session['end_time'].strftime('%Y-%m-%d %H:%M')
+
+            lines.append(f"## 用戶體驗報告 ({hotel} - {room})")
+            lines.append(f"### 住宿期間：{start_time} ~ {end_time}")
+            lines.append("")
+
+            # Add conversations
+            for conv in session['conversations']:
+                timestamp = conv['request_timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+                conv_id = conv.get('conversation_id', 'N/A')
+                user_query = conv.get('user_query', '')
+                chatbot_response = conv.get('chatbot_response', '')
+                timecost = conv.get('response_timecost', 0)
+
+                lines.append(f"[{timestamp}], (ID: {conv_id})")
+                lines.append(f"user：{user_query}")
+                lines.append(f"chatbot: {chatbot_response} (思考時間:{timecost:.2f}s)")
+                lines.append("")
+
+            lines.append("---")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def export_to_file(self,
+                       df: pd.DataFrame,
+                       checkin_time: str,
+                       checkout_time: str,
+                       filename: str = None) -> Tuple[str, str]:
+        """
+        Complete export workflow
+
+        Args:
+            df: Filtered DataFrame
+            checkin_time: Check-in time string (e.g., "14:00")
+            checkout_time: Check-out time string (e.g., "11:00")
+            filename: Optional filename
+
+        Returns:
+            Tuple of (content: str, filename: str)
+        """
+        # Segment data
+        sessions = self.segment_by_stay_sessions(df, checkin_time, checkout_time)
+
+        # Generate export text
+        export_date = datetime.now().strftime('%Y-%m-%d')
+        content = self.generate_export_text(sessions, export_date)
+
+        # Generate filename
+        if not filename:
+            if len(df['hotel_name'].unique()) == 1:
+                hotel_name = df['hotel_name'].iloc[0]
+                filename = f"{hotel_name}_對話分析報告_{export_date}.txt"
+            else:
+                filename = f"綜合對話分析報告_{export_date}.txt"
+
+        return content, filename
