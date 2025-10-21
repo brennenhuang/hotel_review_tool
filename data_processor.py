@@ -4,7 +4,8 @@ Handles data loading, column mapping, and transformations
 """
 
 import pandas as pd
-from datetime import datetime, timedelta
+import pytz
+from datetime import datetime, timedelta, time
 from typing import List, Tuple, Optional
 
 
@@ -262,7 +263,9 @@ class DataProcessor:
         """Get min and max dates from the dataset"""
         if self.df is None or "request_timestamp" not in self.df.columns:
             return None, None
-        return self.df["request_timestamp"].min(), self.df["request_timestamp"].max()
+        min_date = self.df["request_timestamp"].min()
+        max_date = self.df["request_timestamp"].max()
+        return min_date, max_date
 
     def get_timecost_range(self) -> Tuple[float, float]:
         """Get min and max response timecost"""
@@ -271,3 +274,129 @@ class DataProcessor:
         return float(self.df["response_timecost"].min()), float(
             self.df["response_timecost"].max()
         )
+
+    def get_available_timezones(self) -> List[Tuple[str, str]]:
+        """
+        Get list of commonly used timezones for selection
+
+        Returns:
+            List of tuples (timezone_id, display_name)
+        """
+        common_timezones = [
+            ("UTC", "UTC (協調世界時)"),
+            ("Asia/Taipei", "UTC+8 (台北時間)"),
+            ("Asia/Shanghai", "UTC+8 (上海時間)"),
+            ("Asia/Hong_Kong", "UTC+8 (香港時間)"),
+            ("Asia/Singapore", "UTC+8 (新加坡時間)"),
+            ("Asia/Tokyo", "UTC+9 (東京時間)"),
+            ("Europe/London", "UTC+0/+1 (倫敦時間)"),
+            ("America/New_York", "UTC-5/-4 (紐約時間)"),
+            ("America/Los_Angeles", "UTC-8/-7 (洛杉磯時間)"),
+        ]
+        return common_timezones
+
+    def convert_timezone(
+        self, source_timezone: str = "Asia/Taipei", target_timezone: str = "UTC"
+    ) -> Optional[pd.DataFrame]:
+        """
+        Convert timestamps from source timezone to target timezone
+
+        Args:
+            source_timezone: Source timezone (default: Asia/Taipei for UTC+8)
+            target_timezone: Target timezone for conversion
+
+        Returns:
+            DataFrame with converted timestamps, or None if no data
+        """
+        if self.df is None:
+            return None
+
+        df_converted = self.df.copy()
+
+        try:
+            # Define timezones
+            source_tz = pytz.timezone(source_timezone)
+            target_tz = pytz.timezone(target_timezone)
+
+            # Convert timestamps
+            # First, assume the timestamps are naive and in source timezone
+            df_converted["request_timestamp"] = df_converted["request_timestamp"].apply(
+                lambda x: self._convert_single_timestamp(x, source_tz, target_tz)
+            )
+
+            return df_converted
+
+        except Exception as e:
+            print(f"Timezone conversion error: {e}")
+            return self.df.copy()
+
+    def _convert_single_timestamp(self, timestamp, source_tz, target_tz) -> datetime:
+        """
+        Convert a single timestamp between timezones
+
+        Args:
+            timestamp: Input timestamp
+            source_tz: Source timezone object
+            target_tz: Target timezone object
+
+        Returns:
+            Converted timestamp
+        """
+        if pd.isna(timestamp):
+            return timestamp
+
+        try:
+            # If timestamp is naive (no timezone info), localize it to source timezone
+            if timestamp.tzinfo is None:
+                localized_ts = source_tz.localize(timestamp)
+            else:
+                # If already has timezone info, convert to source timezone
+                localized_ts = timestamp.astimezone(source_tz)
+
+            # Convert to target timezone
+            converted_ts = localized_ts.astimezone(target_tz)
+
+            # Return as naive timestamp in target timezone
+            return converted_ts.replace(tzinfo=None)
+
+        except Exception as e:
+            print(f"Single timestamp conversion error: {e}")
+            return timestamp
+
+    def convert_time_to_timezone(
+        self,
+        time_obj: time,
+        date_reference: datetime,
+        source_timezone: str = "Asia/Taipei",
+        target_timezone: str = "UTC",
+    ) -> time:
+        """
+        Convert a time object from source timezone to target timezone
+
+        Args:
+            time_obj: Time object to convert (e.g., 14:00 for check-in)
+            date_reference: Reference date for the conversion
+            source_timezone: Source timezone (default: Asia/Taipei)
+            target_timezone: Target timezone for conversion
+
+        Returns:
+            Converted time object in target timezone
+        """
+        try:
+            # Create a datetime with the reference date and time
+            dt_with_time = datetime.combine(date_reference.date(), time_obj)
+
+            # Convert using existing method
+            source_tz = pytz.timezone(source_timezone)
+            target_tz = pytz.timezone(target_timezone)
+
+            converted_dt = self._convert_single_timestamp(
+                dt_with_time, source_tz, target_tz
+            )
+
+            # Return only the time part
+            return converted_dt.time()
+
+        except Exception as e:
+            print(f"Time conversion error: {e}")
+            return time_obj
