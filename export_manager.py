@@ -206,17 +206,20 @@ class ExportManager:
             except (KeyError, ValueError):
                 timezone_display = ""
 
+        # Sort sessions by start_time first, then by room name
+        sorted_sessions = sorted(sessions, key=lambda s: (s["start_time"], s["room"]))
+
         # Header
         lines = [
             "智能音箱對話分析報告",
             f"導出日期：{export_date}{timezone_display}",
-            f"總共 {len(sessions)} 個住宿時段",
+            f"總共 {len(sorted_sessions)} 個住宿時段",
             "=" * 80,
             "",
         ]
 
         # Add each session as a separate report section
-        for i, session in enumerate(sessions, 1):
+        for i, session in enumerate(sorted_sessions, 1):
             hotel = session["hotel"]
             room = session["room"]
 
