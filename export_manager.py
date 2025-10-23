@@ -13,9 +13,6 @@ import pytz
 class ExportManager:
     """Manage data export with intelligent stay session segmentation"""
 
-    def __init__(self):
-        pass
-
     def segment_by_stay_sessions(
         self, df: pd.DataFrame, checkin_time_str: str, checkout_time_str: str
     ) -> List[Dict]:
@@ -244,7 +241,7 @@ class ExportManager:
             "",
         ]
 
-        # Add each session
+        # Add each session as a separate report section
         for i, session in enumerate(sessions, 1):
             hotel = session["hotel"]
             room = session["room"]
@@ -362,16 +359,62 @@ class ExportManager:
         )
 
         # Fix session display times to show local hotel times
+        # Always use local time for display, regardless of data timezone
         if source_timezone and target_timezone and source_timezone != target_timezone:
+            # Data has been timezone converted
+            # Reconstruct display times based on conversations' dates and local times
             for session in sessions:
-                # Convert session boundaries back to local time for display
-                # Session times currently in target timezone, convert to local
-                session["display_start_time"] = self._convert_session_time_to_local(
-                    session["start_time"], target_timezone, source_timezone
-                )
-                session["display_end_time"] = self._convert_session_time_to_local(
-                    session["end_time"], target_timezone, source_timezone
-                )
+                if session["conversations"]:
+                    # Get first conversation's timestamp (in target timezone)
+                    first_conv_ts = session["conversations"][0]["request_timestamp"]
+
+                    # Convert to source timezone to get the actual date
+                    target_tz = pytz.timezone(target_timezone)
+                    source_tz = pytz.timezone(source_timezone)
+
+                    # Localize and convert
+                    localized_ts = target_tz.localize(
+                        first_conv_ts.replace(tzinfo=None)
+                    )
+                    local_ts = localized_ts.astimezone(source_tz)
+
+                    # Reconstruct session boundaries in local time
+                    local_date = local_ts.date()
+                    local_time = local_ts.time()
+
+                    checkin_parts = checkin_time.split(":")
+                    checkout_parts = checkout_time.split(":")
+                    checkin_time_obj = time(
+                        int(checkin_parts[0]), int(checkin_parts[1])
+                    )
+                    checkout_time_obj = time(
+                        int(checkout_parts[0]), int(checkout_parts[1])
+                    )
+
+                    # Determine session start date
+                    if local_time >= checkin_time_obj:
+                        session_start = datetime.combine(local_date, checkin_time_obj)
+                    else:
+                        session_start = datetime.combine(
+                            local_date - timedelta(days=1), checkin_time_obj
+                        )
+
+                    # Calculate session end
+                    if checkout_time_obj <= checkin_time_obj:
+                        session_end = datetime.combine(
+                            session_start.date() + timedelta(days=1), checkout_time_obj
+                        )
+                    else:
+                        session_end = datetime.combine(
+                            session_start.date(), checkout_time_obj
+                        )
+
+                    session["display_start_time"] = session_start
+                    session["display_end_time"] = session_end
+                else:
+                    # Fallback
+                    session["display_start_time"] = session["start_time"]
+                    session["display_end_time"] = session["end_time"]
         else:
             # No timezone conversion, use original times
             for session in sessions:
