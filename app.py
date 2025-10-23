@@ -428,12 +428,6 @@ def dashboard_page():
                         checkin_str,
                         checkout_str,
                         target_timezone=selected_timezone,
-                        source_timezone=(
-                            "Asia/Taipei"
-                            if selected_timezone != "Asia/Taipei"
-                            else None
-                        ),
-                        dst_override=dst_override,
                     )
 
                     st.success(

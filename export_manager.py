@@ -7,7 +7,6 @@ from datetime import datetime, time, timedelta
 from typing import Dict, List, Tuple
 
 import pandas as pd
-import pytz
 
 
 class ExportManager:
@@ -142,6 +141,10 @@ class ExportManager:
         if conversation_time >= checkin_time:
             # Conversation after check-in time - belongs to session starting today
             checkin_datetime = datetime.combine(timestamp.date(), checkin_time)
+        elif checkout_time <= checkin_time and conversation_time > checkout_time:
+            # Conversation is after checkout but before next checkin (gap period)
+            # This belongs to the session starting today
+            checkin_datetime = datetime.combine(timestamp.date(), checkin_time)
         else:
             # Conversation before check-in time - belongs to session starting yesterday
             checkin_datetime = datetime.combine(
@@ -172,35 +175,6 @@ class ExportManager:
             True if timestamp is in session, False otherwise
         """
         return session["start"] <= timestamp < session["end"]
-
-    def _convert_session_time_to_local(self, session_time, from_timezone, to_timezone):
-        """
-        Convert session boundary time back to local timezone for display
-
-        Args:
-            session_time: Session boundary datetime
-            from_timezone: Current timezone of the session time
-            to_timezone: Target timezone (local hotel time)
-
-        Returns:
-            Converted datetime in local timezone
-        """
-        try:
-            from_tz = pytz.timezone(from_timezone)
-            to_tz = pytz.timezone(to_timezone)
-
-            # Localize the session time to from_timezone
-            localized_time = from_tz.localize(session_time.replace(tzinfo=None))
-
-            # Convert to target timezone
-            converted_time = localized_time.astimezone(to_tz)
-
-            # Return as naive datetime
-            return converted_time.replace(tzinfo=None)
-
-        except Exception as e:
-            print(f"Session time conversion error: {e}")
-            return session_time
 
     def generate_export_text(
         self, sessions: List[Dict], export_date: str = None, target_timezone: str = None
@@ -283,143 +257,35 @@ class ExportManager:
         checkout_time: str,
         filename: str = None,
         target_timezone: str = None,
-        source_timezone: str = None,
-        dst_override: str = None,
     ) -> Tuple[str, str]:
         """
         Complete export workflow
 
         Args:
             df: Filtered DataFrame (may be timezone-converted)
-            checkin_time: Check-in time string in local hotel time (e.g., "14:00")
-            checkout_time: Check-out time string in local hotel time (e.g., "11:00")
+            checkin_time: Check-in time string in target timezone (e.g., "14:00")
+            checkout_time: Check-out time string in target timezone (e.g., "11:00")
             filename: Optional filename
             target_timezone: Target timezone for display (e.g., 'UTC', 'Asia/Taipei')
-            source_timezone: Source timezone if data was converted (e.g., 'Asia/Taipei')
 
         Returns:
             Tuple of (content: str, filename: str)
         """
-        # Handle timezone conversion for session segmentation
-        if source_timezone and target_timezone and source_timezone != target_timezone:
-            # Data has been timezone converted, need to convert checkin/checkout times for comparison
-            # Use first timestamp as reference for date
-            if not df.empty:
-                sample_date = df["request_timestamp"].iloc[0]
-
-                # Convert local hotel times to data timezone for session segmentation
-                from datetime import time as time_cls
-
-                checkin_parts = checkin_time.split(":")
-                checkout_parts = checkout_time.split(":")
-                checkin_time_obj = time_cls(
-                    int(checkin_parts[0]), int(checkin_parts[1])
-                )
-                checkout_time_obj = time_cls(
-                    int(checkout_parts[0]), int(checkout_parts[1])
-                )
-
-                # Create a datetime with sample date and local times
-                sample_checkin_dt = datetime.combine(
-                    sample_date.date(), checkin_time_obj
-                )
-                sample_checkout_dt = datetime.combine(
-                    sample_date.date(), checkout_time_obj
-                )
-
-                # Convert to source timezone then to target timezone for comparison
-                source_tz = pytz.timezone(source_timezone)
-                target_tz = pytz.timezone(target_timezone)
-
-                # Localize to source timezone
-                localized_checkin = source_tz.localize(
-                    sample_checkin_dt.replace(tzinfo=None)
-                )
-                localized_checkout = source_tz.localize(
-                    sample_checkout_dt.replace(tzinfo=None)
-                )
-
-                # Convert to target timezone
-                converted_checkin = localized_checkin.astimezone(target_tz)
-                converted_checkout = localized_checkout.astimezone(target_tz)
-
-                # Use converted times for session segmentation
-                segmentation_checkin = converted_checkin.strftime("%H:%M")
-                segmentation_checkout = converted_checkout.strftime("%H:%M")
-            else:
-                segmentation_checkin = checkin_time
-                segmentation_checkout = checkout_time
-        else:
-            segmentation_checkin = checkin_time
-            segmentation_checkout = checkout_time
+        # Use check-in/check-out times directly as they are already in target timezone
+        segmentation_checkin = checkin_time
+        segmentation_checkout = checkout_time
 
         # Segment data using appropriate times
         sessions = self.segment_by_stay_sessions(
             df, segmentation_checkin, segmentation_checkout
         )
 
-        # Fix session display times to show local hotel times
-        # Always use local time for display, regardless of data timezone
-        if source_timezone and target_timezone and source_timezone != target_timezone:
-            # Data has been timezone converted
-            # Reconstruct display times based on conversations' dates and local times
-            for session in sessions:
-                if session["conversations"]:
-                    # Get first conversation's timestamp (in target timezone)
-                    first_conv_ts = session["conversations"][0]["request_timestamp"]
-
-                    # Convert to source timezone to get the actual date
-                    target_tz = pytz.timezone(target_timezone)
-                    source_tz = pytz.timezone(source_timezone)
-
-                    # Localize and convert
-                    localized_ts = target_tz.localize(
-                        first_conv_ts.replace(tzinfo=None)
-                    )
-                    local_ts = localized_ts.astimezone(source_tz)
-
-                    # Reconstruct session boundaries in local time
-                    local_date = local_ts.date()
-                    local_time = local_ts.time()
-
-                    checkin_parts = checkin_time.split(":")
-                    checkout_parts = checkout_time.split(":")
-                    checkin_time_obj = time(
-                        int(checkin_parts[0]), int(checkin_parts[1])
-                    )
-                    checkout_time_obj = time(
-                        int(checkout_parts[0]), int(checkout_parts[1])
-                    )
-
-                    # Determine session start date
-                    if local_time >= checkin_time_obj:
-                        session_start = datetime.combine(local_date, checkin_time_obj)
-                    else:
-                        session_start = datetime.combine(
-                            local_date - timedelta(days=1), checkin_time_obj
-                        )
-
-                    # Calculate session end
-                    if checkout_time_obj <= checkin_time_obj:
-                        session_end = datetime.combine(
-                            session_start.date() + timedelta(days=1), checkout_time_obj
-                        )
-                    else:
-                        session_end = datetime.combine(
-                            session_start.date(), checkout_time_obj
-                        )
-
-                    session["display_start_time"] = session_start
-                    session["display_end_time"] = session_end
-                else:
-                    # Fallback
-                    session["display_start_time"] = session["start_time"]
-                    session["display_end_time"] = session["end_time"]
-        else:
-            # No timezone conversion, use original times
-            for session in sessions:
-                session["display_start_time"] = session["start_time"]
-                session["display_end_time"] = session["end_time"]
+        # Set display times directly from session times
+        # Since check-in/check-out times are already in target timezone,
+        # session boundaries are also in the correct timezone
+        for session in sessions:
+            session["display_start_time"] = session["start_time"]
+            session["display_end_time"] = session["end_time"]
 
         # Generate export text
         export_date = datetime.now().strftime("%Y-%m-%d")
