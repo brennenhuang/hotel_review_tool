@@ -15,18 +15,196 @@ class SpotVisualizer:
 
     def __init__(self):
         """初始化可視化器"""
-        self.color_palette = [
-            "#1f77b4",
-            "#ff7f0e",
-            "#2ca02c",
-            "#d62728",
-            "#9467bd",
-            "#8c564b",
-            "#e377c2",
-            "#7f7f7f",
-            "#bcbd22",
-            "#17becf",
-        ]
+        # 為不同類型的圓餅圖設計獨特的色彩方案
+        self.color_schemes = {
+            # 原始互動方式 - 深藍色調系列
+            "raw_interaction": {
+                "UI": "#1f77b4",  # 藍色
+                "HARDWARE": "#ff7f0e",  # 橙色
+                "SYSTEM": "#2ca02c",  # 綠色
+                "VOICE": "#d62728",  # 紅色
+            },
+            # 融合互動方式 - 暖色調系列
+            "merged_interaction": {
+                "UI + SYSTEM": "#aec7e8",  # 淺藍色
+                "HARDWARE": "#ffbb78",  # 淺橙色
+                "VOICE": "#ff9896",  # 淺紅色
+            },
+            # 用戶意圖分佈 - 綠色調系列 + 特殊意圖色彩
+            "intent_distribution": [
+                "#1f77b4",  # 藍色
+                "#aec7e8",  # 淺藍色
+                "#ff7f0e",  # 橙色
+                "#ffbb78",  # 淺橙色
+                "#2ca02c",  # 綠色
+                "#98df8a",  # 淺綠色
+                "#d62728",  # 紅色
+                "#ff9896",  # 淺紅色
+                "#9467bd",  # 紫色
+                "#c5b0d5",  # 淺紫色
+                "#8c564b",  # 棕色
+                "#c49c94",  # 淺棕色
+                "#e377c2",  # 粉紅色
+                "#f7b6d2",  # 淺粉紅色
+                "#7f7f7f",  # 灰色
+                "#bcbd22",  # 黃綠色
+                "#17becf",  # 青色
+                "#9edae5",  # 淺青色
+            ],
+            # 其他意圖詳細分佈 - 使用與 intent_distribution 相同的色彩方案
+            "others_breakdown": [
+                "#1f77b4",  # 藍色
+                "#aec7e8",  # 淺藍色
+                "#ff7f0e",  # 橙色
+                "#ffbb78",  # 淺橙色
+                "#2ca02c",  # 綠色
+                "#98df8a",  # 淺綠色
+                "#d62728",  # 紅色
+                "#ff9896",  # 淺紅色
+                "#9467bd",  # 紫色
+                "#c5b0d5",  # 淺紫色
+                "#8c564b",  # 棕色
+                "#c49c94",  # 淺棕色
+                "#e377c2",  # 粉紅色
+                "#f7b6d2",  # 淺粉紅色
+                "#7f7f7f",  # 灰色
+                "#bcbd22",  # 黃綠色
+                "#17becf",  # 青色
+                "#9edae5",  # 淺青色
+            ],
+        }
+
+        # 特殊意圖的固定顏色
+        self.special_colors = {
+            "MODULE_NOT_SUPPORT": "#c0392b",  # 深紅色 - 錯誤
+            "LOCALE": "#e67e22",  # 深橙色 - 語言設定
+            "WAKE UP": "#229954",  # 深綠色 - 喚醒功能
+        }
+
+    def _calculate_dynamic_layout(
+        self, font_size: int, base_height: int = 400, data_count: int = 0
+    ) -> Dict:
+        """
+        根據字體大小和數據數量計算動態佈局參數
+
+        Args:
+            font_size: 字體大小
+            base_height: 基礎高度
+            data_count: 數據項目數量
+
+        Returns:
+            Dict: 包含 margin, height 和 text_strategy 的佈局參數
+        """
+        # 根據字體大小調整邊距（字體越大，邊距越大）
+        margin_factor = max(1.5, font_size / 8.0)  # 更激進的邊距調整
+        base_margin = 40  # 增加基礎邊距
+
+        # 根據數據項目數量調整邊距（項目越多，需要越多空間）
+        data_factor = max(1.2, data_count / 6.0) if data_count > 0 else 1.0
+
+        dynamic_margin = {
+            "t": int(100 * margin_factor),  # 頂部邊距大幅增加
+            "b": int(base_margin * margin_factor * data_factor),  # 底部邊距
+            "l": int(base_margin * margin_factor * data_factor),  # 左側邊距
+            "r": int(
+                base_margin * margin_factor * data_factor * 3
+            ),  # 右側邊距大幅增加（外部文字需要更多空間）
+        }
+
+        # 根據字體大小和數據數量調整高度
+        height_factor = max(1.3, font_size / 10.0)
+        data_height_factor = max(1.1, data_count / 8.0) if data_count > 0 else 1.0
+        dynamic_height = int(base_height * height_factor * data_height_factor)
+
+        # 決定文字顯示策略
+        text_strategy = self._determine_text_strategy(font_size, data_count)
+
+        return {
+            "margin": dynamic_margin,
+            "height": dynamic_height,
+            "text_strategy": text_strategy,
+        }
+
+    def _determine_text_strategy(self, font_size: int, data_count: int) -> Dict:
+        """
+        根據字體大小和數據數量決定文字顯示策略
+
+        Args:
+            font_size: 字體大小
+            data_count: 數據項目數量
+
+        Returns:
+            Dict: 文字顯示策略配置
+        """
+        strategy = {
+            "position": "auto",
+            "min_percentage": 0,  # 最小顯示百分比閾值
+            "show_all": True,
+        }
+
+        # 大字體或項目太多時，使用更保守的顯示策略
+        if font_size >= 18 or data_count >= 12:
+            strategy.update(
+                {
+                    "position": "outside",  # 強制外部顯示
+                    "min_percentage": (
+                        1.5 if data_count >= 15 else 1.0
+                    ),  # 設置最小顯示閾值
+                    "show_all": False,
+                }
+            )
+        elif font_size >= 14 or data_count >= 8:
+            strategy.update(
+                {"position": "outside", "min_percentage": 0.8, "show_all": False}
+            )
+
+        return strategy
+
+    def _apply_text_strategy(self, labels, values, strategy: Dict):
+        """
+        根據策略過濾和調整文字顯示
+
+        Args:
+            labels: 標籤列表
+            values: 數值列表
+            strategy: 文字顯示策略
+
+        Returns:
+            Tuple: (filtered_labels, filtered_values, text_info)
+        """
+        if strategy["show_all"]:
+            return labels, values, "label+percent+value"
+
+        # 計算百分比並過濾小比例項目
+        total = sum(values)
+        min_threshold = strategy["min_percentage"]
+
+        filtered_labels = []
+        filtered_values = []
+        hidden_count = 0
+        hidden_total = 0
+
+        for label, value in zip(labels, values):
+            percentage = (value / total) * 100 if total > 0 else 0
+            if percentage >= min_threshold:
+                filtered_labels.append(label)
+                filtered_values.append(value)
+            else:
+                hidden_count += 1
+                hidden_total += value
+
+        # 如果有隱藏項目，添加到"其他"或合併
+        if hidden_count > 0:
+            if "其他" in filtered_labels:
+                # 如果已經有"其他"類別，合併數值
+                other_index = filtered_labels.index("其他")
+                filtered_values[other_index] += hidden_total
+            else:
+                # 添加新的"其他"類別
+                filtered_labels.append(f"其他 ({hidden_count}項)")
+                filtered_values.append(hidden_total)
+
+        return filtered_labels, filtered_values, "label+percent+value"
 
     def create_raw_interaction_pie_chart(
         self, distribution_data: Dict, font_size: int = 12
@@ -70,14 +248,13 @@ class SpotVisualizer:
             for label, value, pct in zip(labels, values, percentages)
         ]
 
-        # 自定義顏色映射
-        color_mapping = {
-            "UI": "#1f77b4",
-            "HARDWARE": "#ff7f0e",
-            "SYSTEM": "#2ca02c",
-            "VOICE": "#d62728",
-        }
-        colors = [color_mapping.get(label, "#gray") for label in labels]
+        # 使用原始互動方式專用色彩方案（藍色調系列）
+        color_scheme = self.color_schemes["raw_interaction"]
+        colors = [color_scheme.get(label, "#34495e") for label in labels]
+
+        # 計算動態佈局參數
+        data_count = len(distribution_data) if distribution_data else 0
+        layout_params = self._calculate_dynamic_layout(font_size, 400, data_count)
 
         # 創建圓餅圖
         fig = go.Figure(
@@ -89,6 +266,7 @@ class SpotVisualizer:
                     hovertemplate="%{hovertext}<extra></extra>",
                     textinfo="label+percent+value",
                     texttemplate="%{label}<br>%{value:,}<br>(%{percent})",
+                    textposition="auto",  # 自動選擇文字位置避免溢出
                     marker=dict(colors=colors, line=dict(color="white", width=2)),
                     pull=[
                         0.05 if label == "VOICE" else 0 for label in labels
@@ -105,8 +283,8 @@ class SpotVisualizer:
                 "font": {"size": 18, "family": "Arial, sans-serif"},
             },
             font=dict(size=font_size),
-            height=400,
-            margin=dict(t=60, b=20, l=20, r=20),
+            height=layout_params["height"],
+            margin=layout_params["margin"],
             showlegend=True,
             legend=dict(
                 orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02
@@ -157,13 +335,13 @@ class SpotVisualizer:
             for label, value, pct in zip(labels, values, percentages)
         ]
 
-        # 自定義顏色映射
-        color_mapping = {
-            "UI + SYSTEM": "#9467bd",
-            "HARDWARE": "#ff7f0e",
-            "VOICE": "#d62728",
-        }
-        colors = [color_mapping.get(label, "#gray") for label in labels]
+        # 使用融合互動方式專用色彩方案（暖色調系列）
+        color_scheme = self.color_schemes["merged_interaction"]
+        colors = [color_scheme.get(label, "#7f8c8d") for label in labels]
+
+        # 計算動態佈局參數
+        data_count = len(distribution_data) if distribution_data else 0
+        layout_params = self._calculate_dynamic_layout(font_size, 400, data_count)
 
         # 創建圓餅圖
         fig = go.Figure(
@@ -175,6 +353,7 @@ class SpotVisualizer:
                     hovertemplate="%{hovertext}<extra></extra>",
                     textinfo="label+percent+value",
                     texttemplate="%{label}<br>%{value:,}<br>(%{percent})",
+                    textposition="auto",  # 自動選擇文字位置避免溢出
                     marker=dict(colors=colors, line=dict(color="white", width=2)),
                     pull=[
                         0.05 if label == "VOICE" else 0 for label in labels
@@ -191,8 +370,8 @@ class SpotVisualizer:
                 "font": {"size": 18, "family": "Arial, sans-serif"},
             },
             font=dict(size=font_size),
-            height=400,
-            margin=dict(t=60, b=20, l=20, r=20),
+            height=layout_params["height"],
+            margin=layout_params["margin"],
             showlegend=True,
             legend=dict(
                 orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02
@@ -232,43 +411,60 @@ class SpotVisualizer:
         # 準備數據
         labels = list(intent_data.keys())
         values = list(intent_data.values())
-        total = sum(values)
+        data_count = len(labels)
 
-        # 計算百分比
-        percentages = [(v / total * 100) if total > 0 else 0 for v in values]
+        # 計算動態佈局參數（用戶意圖圖較高，考慮數據項目數量）
+        layout_params = self._calculate_dynamic_layout(font_size, 500, data_count)
+        text_strategy = layout_params["text_strategy"]
+
+        # 根據策略過濾數據（如果字體太大或項目太多）
+        filtered_labels, filtered_values, text_info = self._apply_text_strategy(
+            labels, values, text_strategy
+        )
+
+        # 重新計算基於過濾後的數據
+        total = sum(filtered_values)
+        percentages = [(v / total * 100) if total > 0 else 0 for v in filtered_values]
 
         # 創建標籤文字
         hover_text = [
             f"{label}<br>數量: {value:,}<br>比例: {pct:.1f}%"
-            for label, value, pct in zip(labels, values, percentages)
+            for label, value, pct in zip(filtered_labels, filtered_values, percentages)
         ]
 
         # 特殊意圖高亮顯示
         special_intents = {"LOCALE", "WAKE UP", "MODULE_NOT_SUPPORT"}
-        pull_values = [0.1 if label in special_intents else 0 for label in labels]
+        pull_values = [
+            0.1 if label in special_intents else 0 for label in filtered_labels
+        ]
 
-        # 為特殊意圖分配特定顏色
+        # 使用用戶意圖分佈專用色彩方案（綠色調系列）
         colors = []
-        for i, label in enumerate(labels):
-            if label == "MODULE_NOT_SUPPORT":
-                colors.append("#d62728")  # 紅色 - 錯誤
-            elif label == "LOCALE":
-                colors.append("#ff7f0e")  # 橙色 - 語言設定
-            elif label == "WAKE UP":
-                colors.append("#2ca02c")  # 綠色 - 喚醒功能
+        intent_colors = self.color_schemes["intent_distribution"]
+        color_index = 0
+
+        for label in filtered_labels:
+            if label in self.special_colors:
+                # 特殊意圖使用固定顏色
+                colors.append(self.special_colors[label])
+            elif "其他" in label:
+                colors.append("#95a5a6")  # 灰色 - 其他項目
             else:
-                colors.append(self.color_palette[i % len(self.color_palette)])
+                # 普通意圖使用綠色調系列
+                colors.append(intent_colors[color_index % len(intent_colors)])
+                color_index += 1
 
         # 創建圓餅圖
         fig = go.Figure(
             data=[
                 go.Pie(
-                    labels=labels,
-                    values=values,
+                    labels=filtered_labels,
+                    values=filtered_values,
                     hovertext=hover_text,
                     hovertemplate="%{hovertext}<extra></extra>",
-                    textinfo="label+percent+value",
+                    textinfo=text_info,
                     texttemplate="%{label}<br>%{value:,}<br>(%{percent})",
+                    textposition=text_strategy["position"],  # 使用策略決定的位置
                     marker=dict(colors=colors, line=dict(color="white", width=2)),
                     pull=pull_values,
                 )
@@ -283,8 +479,8 @@ class SpotVisualizer:
                 "font": {"size": 18, "family": "Arial, sans-serif"},
             },
             font=dict(size=font_size),
-            height=500,
-            margin=dict(t=60, b=20, l=20, r=20),
+            height=layout_params["height"],
+            margin=layout_params["margin"],
             showlegend=True,
             legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
         )
@@ -333,20 +529,13 @@ class SpotVisualizer:
             for label, value, pct in zip(labels, values, percentages)
         ]
 
-        # 使用較淺的顏色調色盤來表示這是"其他"類別
-        colors = [
-            "#FFB6C1",
-            "#FFC0CB",
-            "#FFE4E1",
-            "#F0E68C",
-            "#E6E6FA",
-            "#DDA0DD",
-            "#F5DEB3",
-            "#D3D3D3",
-            "#B0E0E6",
-            "#AFEEEE",
-        ]
-        chart_colors = colors[: len(labels)]
+        # 使用其他意圖詳細分佈專用色彩方案（紫色調系列）
+        others_colors = self.color_schemes["others_breakdown"]
+        chart_colors = others_colors[: len(labels)]
+
+        # 計算動態佈局參數
+        data_count = len(others_data) if others_data else 0
+        layout_params = self._calculate_dynamic_layout(font_size, 400, data_count)
 
         # 創建圓餅圖
         fig = go.Figure(
@@ -358,8 +547,11 @@ class SpotVisualizer:
                     hovertemplate="%{hovertext}<extra></extra>",
                     textinfo="label+percent+value",
                     texttemplate="%{label}<br>%{value:,}<br>(%{percent})",
+                    textposition="auto",  # 自動選擇文字位置避免溢出
                     marker=dict(colors=chart_colors, line=dict(color="white", width=2)),
-                    textfont=dict(size=font_size - 2),  # 略小於主圓餅圖
+                    textfont=dict(
+                        size=max(8, font_size - 2)
+                    ),  # 略小於主圓餅圖，但不小於8
                 )
             ]
         )
@@ -372,8 +564,8 @@ class SpotVisualizer:
                 "font": {"size": 16, "family": "Arial, sans-serif"},
             },
             font=dict(size=font_size),
-            height=400,
-            margin=dict(t=60, b=20, l=20, r=20),
+            height=layout_params["height"],
+            margin=layout_params["margin"],
             showlegend=True,
             legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
         )

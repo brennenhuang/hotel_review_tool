@@ -283,7 +283,7 @@ def conversation_dashboard_page():
                 if drilldown_fig:
                     st.plotly_chart(drilldown_fig, use_container_width=True)
                 else:
-                    st.info(f"該風險等級下暫無數據")
+                    st.info("該風險等級下暫無數據")
         else:
             st.info("暫無數據")
 
@@ -681,53 +681,47 @@ def ui_dashboard_page():
             key="ui_intent_filter",
         )
 
-        # Font size controls
+        # Chart selection and font size controls
         st.markdown("---")
-        st.subheader("🎨 圓餅圖字體設定")
+        st.subheader("📊 圓餅圖選擇與設定")
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            raw_font_size = st.number_input(
-                "原始互動方式",
-                min_value=8,
-                max_value=24,
-                value=12,
-                step=1,
-                key="raw_interaction_font_size",
-                help="調整原始互動方式圓餅圖的字體大小",
+        # Chart type selection
+        chart_options = {
+            "原始互動方式分佈": "raw_interaction",
+            "融合互動方式分佈": "merged_interaction",
+            "用戶意圖分佈": "intent_distribution",
+            "其他意圖詳細分佈": "others_breakdown",
+        }
+
+        col_select, col_font = st.columns([2, 1])
+
+        with col_select:
+            selected_chart_name = st.selectbox(
+                "選擇要顯示的圓餅圖",
+                options=list(chart_options.keys()),
+                index=2,  # 預設選擇"用戶意圖分佈"
+                key="selected_chart_type",
+                help="選擇要在下方顯示的圓餅圖類型",
             )
+            selected_chart_type = chart_options[selected_chart_name]
 
-        with col2:
-            merged_font_size = st.number_input(
-                "融合互動方式",
+        with col_font:
+            # 根據選中的圖表類型設定預設字體大小
+            default_font_sizes = {
+                "raw_interaction": 12,
+                "merged_interaction": 12,
+                "intent_distribution": 15,
+                "others_breakdown": 12,
+            }
+
+            font_size = st.number_input(
+                "字體大小",
                 min_value=8,
                 max_value=24,
-                value=12,
+                value=default_font_sizes[selected_chart_type],
                 step=1,
-                key="merged_interaction_font_size",
-                help="調整融合互動方式圓餅圖的字體大小",
-            )
-
-        with col3:
-            intent_font_size = st.number_input(
-                "用戶意圖分佈",
-                min_value=8,
-                max_value=24,
-                value=15,
-                step=1,
-                key="intent_distribution_font_size",
-                help="調整用戶意圖分佈圓餅圖的字體大小",
-            )
-
-        with col4:
-            others_font_size = st.number_input(
-                "其他意圖詳情",
-                min_value=8,
-                max_value=24,
-                value=12,
-                step=1,
-                key="others_breakdown_font_size",
-                help="調整其他意圖詳細分佈圓餅圖的字體大小",
+                key=f"{selected_chart_type}_font_size",
+                help=f"調整{selected_chart_name}圓餅圖的字體大小",
             )
 
     # Get filtered data
@@ -749,59 +743,55 @@ def ui_dashboard_page():
 
     st.markdown("---")
 
-    # Display charts in columns
-    col1, col2 = st.columns(2)
+    # Display selected chart
+    st.subheader(f"📊 {selected_chart_name}")
 
-    with col1:
-        # Raw interaction distribution
+    # Prepare data based on chart type
+    if selected_chart_type in ["raw_interaction", "merged_interaction"]:
         interaction_data = (
             st.session_state.spot_data_processor.get_interaction_distribution(
                 filtered_df
             )
         )
-        raw_chart = st.session_state.spot_visualizer.create_raw_interaction_pie_chart(
-            interaction_data["raw"], raw_font_size
+    elif selected_chart_type in ["intent_distribution", "others_breakdown"]:
+        intent_data = st.session_state.spot_data_processor.get_intent_distribution(
+            filtered_df, merge_small=True, threshold=1.0
         )
-        st.plotly_chart(raw_chart, use_container_width=True)
 
-    with col2:
-        # Merged interaction distribution
-        merged_chart = (
-            st.session_state.spot_visualizer.create_merged_interaction_pie_chart(
-                interaction_data["merged"], merged_font_size
-            )
+    # Create and display the selected chart
+    if selected_chart_type == "raw_interaction":
+        chart = st.session_state.spot_visualizer.create_raw_interaction_pie_chart(
+            interaction_data["raw"], font_size
         )
-        st.plotly_chart(merged_chart, use_container_width=True)
+        st.plotly_chart(chart, use_container_width=True)
 
-    # Intent distribution with "others" breakdown
-    intent_data = st.session_state.spot_data_processor.get_intent_distribution(
-        filtered_df, merge_small=True, threshold=1.0
-    )
-
-    # 顯示意圖分佈圖表
-    col3, col4 = st.columns(2)
-
-    with col3:
-        # Main intent distribution (with "others" merged)
-        main_chart = (
-            st.session_state.spot_visualizer.create_intent_distribution_pie_chart(
-                intent_data.get("distribution", {}), intent_font_size
-            )
+    elif selected_chart_type == "merged_interaction":
+        chart = st.session_state.spot_visualizer.create_merged_interaction_pie_chart(
+            interaction_data["merged"], font_size
         )
-        st.plotly_chart(main_chart, use_container_width=True)
+        st.plotly_chart(chart, use_container_width=True)
 
-    with col4:
-        # Others breakdown chart (detailed view of merged items)
+    elif selected_chart_type == "intent_distribution":
+        chart = st.session_state.spot_visualizer.create_intent_distribution_pie_chart(
+            intent_data.get("distribution", {}), font_size
+        )
+        st.plotly_chart(chart, use_container_width=True)
+
+    elif selected_chart_type == "others_breakdown":
         others_breakdown = intent_data.get("others_breakdown", {})
         if others_breakdown:
-            others_chart = (
-                st.session_state.spot_visualizer.create_others_breakdown_pie_chart(
-                    others_breakdown, others_font_size
-                )
+            chart = st.session_state.spot_visualizer.create_others_breakdown_pie_chart(
+                others_breakdown, font_size
             )
-            st.plotly_chart(others_chart, use_container_width=True)
+            st.plotly_chart(chart, use_container_width=True)
         else:
             st.info("📊 所有意圖占比均 ≥ 1%，無需顯示詳細分佈")
+            st.markdown(
+                """
+            **說明：** 當前數據中沒有小於1%的意圖項目需要單獨顯示。
+            您可以選擇「用戶意圖分佈」查看完整的意圖分析。
+            """
+            )
 
     st.markdown("---")
 
