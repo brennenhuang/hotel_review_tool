@@ -70,8 +70,9 @@ def initialize_session_state():
         st.session_state.selected_risk_level = None
 
 
+# DEPRECATED: This function is replaced by conversation_upload_page and ui_upload_page
 def upload_page():
-    """Display upload page"""
+    """Display upload page (DEPRECATED - use conversation_upload_page instead)"""
     st.markdown(
         '<div class="main-header">🎤 智能音箱對話分析平台</div>', unsafe_allow_html=True
     )
@@ -115,19 +116,30 @@ def upload_page():
         )
 
 
-def dashboard_page():
-    """Display main dashboard page"""
-    st.markdown(
-        '<div class="main-header">🎤 智能音箱對話分析平台</div>', unsafe_allow_html=True
-    )
+def conversation_dashboard_page():
+    """Display conversation analysis dashboard page"""
+    st.markdown("### 📊 對話分析儀表板")
 
     # Reset data button
-    col1, col2, col3 = st.columns([6, 1, 1])
+    _, _, col3 = st.columns([6, 1, 1])
     with col3:
         if st.button("🔄 重新上傳", use_container_width=True):
+            # Clear all conversation-related session state
             st.session_state.data_loaded = False
+            st.session_state.conversation_data_loaded = False
             st.session_state.data_processor = DataProcessor()
             st.session_state.show_drilldown = False
+
+            # Clear filter-related keys to reset widgets
+            filter_keys = [
+                "date_range", "timecost_range", "hotels", "rooms",
+                "intents", "languages", "risk_levels", "risk_drilldown",
+                "detail_date_select", "detail_risk_filter"
+            ]
+            for key in filter_keys:
+                if key in st.session_state:
+                    del st.session_state[key]
+
             st.rerun()
 
     st.markdown("---")
@@ -264,7 +276,7 @@ def dashboard_page():
         if risk_fig:
             st.plotly_chart(risk_fig, use_container_width=True)
 
-            # Drill-down section
+            # Drill-down section - Intent distribution by risk level
             st.write("---")
             st.write("### 🔍 風險等級詳細分析")
             st.write("選擇風險等級以查看該等級下的意圖分佈")
@@ -284,7 +296,96 @@ def dashboard_page():
                 if drilldown_fig:
                     st.plotly_chart(drilldown_fig, use_container_width=True)
                 else:
-                    st.info(f"該風險等級下暫無數據")
+                    st.info("該風險等級下暫無數據")
+
+            # Detailed conversation table by date and risk level
+            st.write("---")
+            st.write("### 📋 對話詳細數據查看")
+            st.write("選擇日期和風險等級查看具體的對話內容和回應時間")
+
+            # Get available dates from filtered data
+            if not filtered_df.empty and 'request_timestamp' in filtered_df.columns:
+                available_dates = sorted(
+                    filtered_df['request_timestamp'].dt.date.unique()
+                )
+
+                col_date, col_risk_filter = st.columns([2, 2])
+
+                with col_date:
+                    selected_date = st.selectbox(
+                        "選擇日期",
+                        options=available_dates,
+                        format_func=lambda x: x.strftime('%Y-%m-%d'),
+                        key="detail_date_select"
+                    )
+
+                with col_risk_filter:
+                    risk_filter_option = st.selectbox(
+                        "篩選風險等級",
+                        options=[
+                            "全部風險等級",
+                            "安全 (<3s)",
+                            "低風險 (3-5s)",
+                            "中風險 (5-8s)",
+                            "高風險 (>8s)"
+                        ],
+                        key="detail_risk_filter"
+                    )
+
+                if selected_date:
+                    # Get selected risk level (None means all levels)
+                    selected_risk_for_table = (
+                        None if risk_filter_option == "全部風險等級"
+                        else risk_filter_option
+                    )
+
+                    # Get detailed table
+                    detail_table = (
+                        st.session_state.visualizer.create_risk_detail_table(
+                            filtered_df,
+                            selected_date,
+                            selected_risk_for_table
+                        )
+                    )
+
+                    if detail_table is not None and not detail_table.empty:
+                        st.write(
+                            f"**查看日期：{selected_date.strftime('%Y-%m-%d')}** | "
+                            f"**風險等級：{risk_filter_option}** | "
+                            f"**共 {len(detail_table)} 筆對話**"
+                        )
+
+                        # Display the table with custom styling
+                        st.dataframe(
+                            detail_table,
+                            use_container_width=True,
+                            height=400,
+                            column_config={
+                                "時間戳": st.column_config.DatetimeColumn(
+                                    "時間戳",
+                                    format="YYYY-MM-DD HH:mm:ss"
+                                ),
+                                "回應耗時 (秒)": st.column_config.NumberColumn(
+                                    "回應耗時 (秒)",
+                                    format="%.3f"
+                                )
+                            }
+                        )
+
+                        # Add download button for the detail table
+                        csv_data = detail_table.to_csv(index=False).encode('utf-8-sig')
+                        st.download_button(
+                            label="📥 下載詳細數據 CSV",
+                            data=csv_data,
+                            file_name=f"risk_detail_{selected_date}_{risk_filter_option}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    else:
+                        st.info(
+                            f"📊 {selected_date.strftime('%Y-%m-%d')} "
+                            f"{risk_filter_option} 無數據"
+                        )
         else:
             st.info("暫無數據")
 
@@ -457,10 +558,354 @@ def main():
     """Main application entry point"""
     initialize_session_state()
 
-    if not st.session_state.data_loaded:
-        upload_page()
+    # Sidebar navigation
+    with st.sidebar:
+        st.title("🎤 分析平台")
+        page = st.selectbox(
+            "選擇分析模組", ["💬 對話分析", "📱 UI行為分析"], key="page_selection"
+        )
+
+        st.markdown("---")
+
+    # Route to different pages based on selection
+    if page == "💬 對話分析":
+        conversation_analysis_page()
+    elif page == "📱 UI行為分析":
+        ui_behavior_analysis_page()
+
+
+def conversation_analysis_page():
+    """Conversation analysis page (original functionality)"""
+    st.markdown(
+        '<h1 class="main-header">💬 智能音箱對話分析</h1>', unsafe_allow_html=True
+    )
+
+    if not st.session_state.get("conversation_data_loaded", False):
+        conversation_upload_page()
     else:
-        dashboard_page()
+        conversation_dashboard_page()
+
+
+def ui_behavior_analysis_page():
+    """UI behavior analysis page (new functionality)"""
+    st.markdown(
+        '<h1 class="main-header">📱 智能音箱UI行為分析</h1>', unsafe_allow_html=True
+    )
+
+    if not st.session_state.get("ui_data_loaded", False):
+        ui_upload_page()
+    else:
+        ui_dashboard_page()
+
+
+def conversation_upload_page():
+    """Original upload page renamed"""
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 2rem;">
+            <h2>🎤 歡迎使用智能音箱對話分析平台</h2>
+            <p style="font-size: 1.1rem; color: #666;">
+                上傳您的對話數據CSV檔案，開始進行深度分析
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### 📁 數據上傳")
+
+    # File upload
+    uploaded_file = st.file_uploader(
+        "選擇CSV檔案", type=["csv"], help="僅支援CSV格式，數據筆數限制：100,000筆以內"
+    )
+
+    if uploaded_file is not None:
+        try:
+            with st.spinner("正在處理數據..."):
+                # Initialize data processor if not exists
+                if "data_processor" not in st.session_state:
+                    st.session_state.data_processor = DataProcessor()
+                if "visualizer" not in st.session_state:
+                    st.session_state.visualizer = Visualizer()
+                if "export_manager" not in st.session_state:
+                    st.session_state.export_manager = ExportManager()
+
+                # Load and process data
+                success, message = (
+                    st.session_state.data_processor.load_and_process_csv(
+                        uploaded_file
+                    )
+                )
+
+                if success:
+                    st.session_state.conversation_data_loaded = True
+                    st.session_state.data_loaded = (
+                        True  # Keep for backward compatibility
+                    )
+                    st.success(f"✅ {message}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
+
+        except Exception as e:
+            st.error(f"❌ 處理過程中發生錯誤：{str(e)}")
+
+
+def ui_upload_page():
+    """UI behavior data upload page"""
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 2rem;">
+            <h2>📱 UI介面行為分析</h2>
+            <p style="font-size: 1.1rem; color: #666;">
+                上傳您的UI行為數據CSV檔案，分析用戶互動模式
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### 📁 數據上傳")
+
+    # File upload
+    uploaded_file = st.file_uploader(
+        "選擇UI行為CSV檔案",
+        type=["csv"],
+        help="僅支援CSV格式，數據筆數限制：100,000筆以內",
+        key="ui_file_uploader",
+    )
+
+    if uploaded_file is not None:
+        try:
+            with st.spinner("正在處理UI行為數據..."):
+                # Initialize SPOT data processor
+                from spot_data_processor import SpotDataProcessor
+                from spot_visualizations import SpotVisualizer
+
+                if "spot_data_processor" not in st.session_state:
+                    st.session_state.spot_data_processor = SpotDataProcessor()
+                if "spot_visualizer" not in st.session_state:
+                    st.session_state.spot_visualizer = SpotVisualizer()
+
+                # Load and process UI behavior data
+                success = st.session_state.spot_data_processor.load_data(uploaded_file)
+
+                if success:
+                    st.session_state.ui_data_loaded = True
+                    st.success("✅ UI行為數據載入成功！")
+                    st.rerun()
+                else:
+                    st.error("❌ UI行為數據載入失敗，請檢查檔案格式")
+
+        except Exception as e:
+            st.error(f"❌ 處理過程中發生錯誤：{str(e)}")
+
+
+def ui_dashboard_page():
+    """UI behavior analysis dashboard"""
+    st.markdown("### 📊 UI行為分析儀表板")
+
+    # Reset data button
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col3:
+        if st.button("🔄 重新上傳", use_container_width=True, key="ui_reset_button"):
+            st.session_state.ui_data_loaded = False
+            if "spot_data_processor" in st.session_state:
+                del st.session_state.spot_data_processor
+            if "spot_visualizer" in st.session_state:
+                del st.session_state.spot_visualizer
+            st.rerun()
+
+    st.markdown("---")
+
+    # Sidebar filters
+    with st.sidebar:
+        st.header("🔍 全域篩選器")
+        st.write("選擇篩選條件以過濾整個儀表板的數據")
+
+        # Get filter options
+        filter_options = st.session_state.spot_data_processor.get_filter_options()
+
+        # Hotel filter
+        st.subheader("🏨 飯店")
+        selected_hotels = st.multiselect(
+            "選擇飯店",
+            options=filter_options["hotels"],
+            default=(
+                filter_options["hotels"][:3]
+                if len(filter_options["hotels"]) > 3
+                else filter_options["hotels"]
+            ),
+            key="ui_hotel_filter",
+        )
+
+        # Room filter
+        st.subheader("📍 房間")
+        selected_rooms = st.multiselect(
+            "選擇房間",
+            options=filter_options["rooms"],
+            default=(
+                filter_options["rooms"][:5]
+                if len(filter_options["rooms"]) > 5
+                else filter_options["rooms"]
+            ),
+            key="ui_room_filter",
+        )
+
+        # Device filter
+        st.subheader("📱 設備")
+        selected_devices = st.multiselect(
+            "選擇設備ID",
+            options=filter_options["devices"],
+            default=(
+                filter_options["devices"][:5]
+                if len(filter_options["devices"]) > 5
+                else filter_options["devices"]
+            ),
+            key="ui_device_filter",
+        )
+
+        # Interaction filter
+        st.subheader("💆 互動方式")
+        selected_interactions = st.multiselect(
+            "選擇互動方式",
+            options=filter_options["interactions"],
+            default=filter_options["interactions"],
+            key="ui_interaction_filter",
+        )
+
+        # Intent filter
+        st.subheader("🎯 意圖")
+        selected_intents = st.multiselect(
+            "選擇用戶意圖",
+            options=filter_options["intents"],
+            default=(
+                filter_options["intents"][:10]
+                if len(filter_options["intents"]) > 10
+                else filter_options["intents"]
+            ),
+            key="ui_intent_filter",
+        )
+
+        # Chart selection and font size controls
+        st.markdown("---")
+        st.subheader("📊 圓餅圖選擇與設定")
+
+        # Chart type selection
+        chart_options = {
+            "原始互動方式分佈": "raw_interaction",
+            "融合互動方式分佈": "merged_interaction",
+            "用戶意圖分佈": "intent_distribution",
+            "其他意圖詳細分佈": "others_breakdown",
+        }
+
+        col_select, col_font = st.columns([2, 1])
+
+        with col_select:
+            selected_chart_name = st.selectbox(
+                "選擇要顯示的圓餅圖",
+                options=list(chart_options.keys()),
+                index=2,  # 預設選擇"用戶意圖分佈"
+                key="selected_chart_type",
+                help="選擇要在下方顯示的圓餅圖類型",
+            )
+            selected_chart_type = chart_options[selected_chart_name]
+
+        with col_font:
+            # 根據選中的圖表類型設定預設字體大小
+            default_font_sizes = {
+                "raw_interaction": 12,
+                "merged_interaction": 12,
+                "intent_distribution": 15,
+                "others_breakdown": 12,
+            }
+
+            font_size = st.number_input(
+                "字體大小",
+                min_value=8,
+                max_value=24,
+                value=default_font_sizes[selected_chart_type],
+                step=1,
+                key=f"{selected_chart_type}_font_size",
+                help=f"調整{selected_chart_name}圓餅圖的字體大小",
+            )
+
+    # Get filtered data
+    filtered_df = st.session_state.spot_data_processor.get_filtered_data(
+        hotel_filter=selected_hotels,
+        room_filter=selected_rooms,
+        device_filter=selected_devices,
+        interaction_filter=selected_interactions,
+        intent_filter=selected_intents,
+    )
+
+    if filtered_df.empty:
+        st.warning("⚠️ 當前篩選條件下無數據，請調整篩選條件")
+        return
+
+    # Display summary metrics
+    summary_stats = st.session_state.spot_data_processor.get_summary_stats(filtered_df)
+    st.session_state.spot_visualizer.display_summary_metrics(summary_stats)
+
+    st.markdown("---")
+
+    # Display selected chart
+    st.subheader(f"📊 {selected_chart_name}")
+
+    # Prepare data based on chart type
+    if selected_chart_type in ["raw_interaction", "merged_interaction"]:
+        interaction_data = (
+            st.session_state.spot_data_processor.get_interaction_distribution(
+                filtered_df
+            )
+        )
+    elif selected_chart_type in ["intent_distribution", "others_breakdown"]:
+        intent_data = st.session_state.spot_data_processor.get_intent_distribution(
+            filtered_df, merge_small=True, threshold=1.0
+        )
+
+    # Create and display the selected chart
+    if selected_chart_type == "raw_interaction":
+        chart = st.session_state.spot_visualizer.create_raw_interaction_pie_chart(
+            interaction_data["raw"], font_size
+        )
+        st.plotly_chart(chart, use_container_width=True)
+
+    elif selected_chart_type == "merged_interaction":
+        chart = st.session_state.spot_visualizer.create_merged_interaction_pie_chart(
+            interaction_data["merged"], font_size
+        )
+        st.plotly_chart(chart, use_container_width=True)
+
+    elif selected_chart_type == "intent_distribution":
+        chart = st.session_state.spot_visualizer.create_intent_distribution_pie_chart(
+            intent_data.get("distribution", {}), font_size
+        )
+        st.plotly_chart(chart, use_container_width=True)
+
+    elif selected_chart_type == "others_breakdown":
+        others_breakdown = intent_data.get("others_breakdown", {})
+        if others_breakdown:
+            chart = st.session_state.spot_visualizer.create_others_breakdown_pie_chart(
+                others_breakdown, font_size
+            )
+            st.plotly_chart(chart, use_container_width=True)
+        else:
+            st.info("📊 所有意圖占比均 ≥ 1%，無需顯示詳細分佈")
+            st.markdown(
+                """
+            **說明：** 當前數據中沒有小於1%的意圖項目需要單獨顯示。
+            您可以選擇「用戶意圖分佈」查看完整的意圖分析。
+            """
+            )
+
+    st.markdown("---")
+
+    # MODULE_NOT_SUPPORT details table
+    error_df = st.session_state.spot_data_processor.get_module_not_support_details(
+        filtered_df
+    )
+    st.session_state.spot_visualizer.display_module_not_support_table(error_df)
 
 
 if __name__ == "__main__":

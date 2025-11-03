@@ -83,6 +83,15 @@ class Visualizer:
         # Count by date and risk level
         risk_by_date = df_copy.groupby(['date', 'risk_level']).size().reset_index(name='count')
 
+        # Calculate total count per date for percentage calculation
+        date_totals = risk_by_date.groupby('date')['count'].sum().to_dict()
+
+        # Add percentage column
+        risk_by_date['percentage'] = risk_by_date.apply(
+            lambda row: (row['count'] / date_totals[row['date']]) * 100,
+            axis=1
+        )
+
         # Define risk level order
         risk_order = ['安全 (<3s)', '低風險 (3-5s)', '中風險 (5-8s)', '高風險 (>8s)']
         risk_colors = {
@@ -97,12 +106,23 @@ class Visualizer:
 
         for risk_level in risk_order:
             risk_data = risk_by_date[risk_by_date['risk_level'] == risk_level]
+
+            # Create text labels with percentage
+            text_labels = [
+                f'{count} ({pct:.1f}%)'
+                for count, pct in zip(risk_data['count'], risk_data['percentage'])
+            ]
+
             fig.add_trace(go.Bar(
                 x=risk_data['date'],
                 y=risk_data['count'],
                 name=risk_level,
                 marker_color=risk_colors.get(risk_level, '#gray'),
-                hovertemplate='<b>%{x}</b><br>%{fullData.name}<br>數量: %{y}<extra></extra>'
+                text=text_labels,
+                textposition='inside',
+                textfont=dict(color='white', size=12),
+                hovertemplate='<b>%{x}</b><br>%{fullData.name}<br>數量: %{y}<br>佔比: %{customdata:.1f}%<extra></extra>',
+                customdata=risk_data['percentage']
             ))
 
         fig.update_layout(
@@ -118,7 +138,8 @@ class Visualizer:
                 y=1.02,
                 xanchor="right",
                 x=1
-            )
+            ),
+            uniformtext=dict(mode='hide', minsize=8)
         )
 
         return fig
@@ -286,6 +307,92 @@ class Visualizer:
         img_base64 = base64.b64encode(img_buffer.read()).decode()
 
         return img_base64
+
+    @staticmethod
+    def create_risk_detail_table(
+        df: pd.DataFrame, selected_date: str, selected_risk_level: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        Create detailed table for a specific date and optional risk level
+
+        Args:
+            df: Filtered DataFrame
+            selected_date: Selected date to filter
+            selected_risk_level: Optional risk level to filter
+
+        Returns:
+            DataFrame with user query, chatbot response, and time cost
+        """
+        if df.empty or 'request_timestamp' not in df.columns:
+            return None
+
+        # Convert selected_date string to date object for comparison
+        from datetime import datetime
+        try:
+            if isinstance(selected_date, str):
+                filter_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
+            else:
+                filter_date = selected_date
+        except (ValueError, TypeError):
+            return None
+
+        # Filter by date
+        df_copy = df.copy()
+        df_copy['date'] = df_copy['request_timestamp'].dt.date
+        date_filtered = df_copy[df_copy['date'] == filter_date]
+
+        if date_filtered.empty:
+            return None
+
+        # Filter by risk level if provided
+        if selected_risk_level:
+            date_filtered = date_filtered[
+                date_filtered['risk_level'] == selected_risk_level
+            ]
+
+        if date_filtered.empty:
+            return None
+
+        # Select relevant columns for display
+        columns_to_show = [
+            'request_timestamp',
+            'risk_level',
+            'user_query',
+            'chatbot_response',
+            'response_timecost',
+            'hotel_name',
+            'room_name'
+        ]
+
+        # Filter to only include existing columns
+        available_columns = [
+            col for col in columns_to_show if col in date_filtered.columns
+        ]
+
+        result_df = date_filtered[available_columns].copy()
+
+        # Sort by response_timecost descending (highest risk first)
+        if 'response_timecost' in result_df.columns:
+            result_df = result_df.sort_values(
+                'response_timecost', ascending=False
+            )
+
+        # Rename columns for better display
+        column_rename = {
+            'request_timestamp': '時間戳',
+            'risk_level': '風險等級',
+            'user_query': '用戶查詢',
+            'chatbot_response': '機器人回應',
+            'response_timecost': '回應耗時 (秒)',
+            'hotel_name': '飯店',
+            'room_name': '房間'
+        }
+
+        result_df = result_df.rename(
+            columns={k: v for k, v in column_rename.items() if k in result_df.columns}
+        )
+
+        return result_df
 
     @staticmethod
     def create_summary_metrics(df: pd.DataFrame) -> dict:
