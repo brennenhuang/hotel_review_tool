@@ -121,12 +121,24 @@ def conversation_dashboard_page():
     st.markdown("### 📊 對話分析儀表板")
 
     # Reset data button
-    col1, col2, col3 = st.columns([6, 1, 1])
+    _, _, col3 = st.columns([6, 1, 1])
     with col3:
         if st.button("🔄 重新上傳", use_container_width=True):
+            # Clear all conversation-related session state
             st.session_state.data_loaded = False
+            st.session_state.conversation_data_loaded = False
             st.session_state.data_processor = DataProcessor()
             st.session_state.show_drilldown = False
+
+            # Clear filter-related keys to reset widgets
+            filter_keys = [
+                "date_range", "timecost_range", "hotels", "rooms",
+                "intents", "languages", "risk_levels", "risk_drilldown"
+            ]
+            for key in filter_keys:
+                if key in st.session_state:
+                    del st.session_state[key]
+
             st.rerun()
 
     st.markdown("---")
@@ -529,7 +541,11 @@ def conversation_upload_page():
                     st.session_state.export_manager = ExportManager()
 
                 # Load and process data
-                success, message = st.session_state.data_processor.load_and_process_csv(uploaded_file)
+                success, message = (
+                    st.session_state.data_processor.load_and_process_csv(
+                        uploaded_file
+                    )
+                )
 
                 if success:
                     st.session_state.conversation_data_loaded = True
