@@ -133,7 +133,8 @@ def conversation_dashboard_page():
             # Clear filter-related keys to reset widgets
             filter_keys = [
                 "date_range", "timecost_range", "hotels", "rooms",
-                "intents", "languages", "risk_levels", "risk_drilldown"
+                "intents", "languages", "risk_levels", "risk_drilldown",
+                "detail_date_select", "detail_risk_filter"
             ]
             for key in filter_keys:
                 if key in st.session_state:
@@ -275,7 +276,7 @@ def conversation_dashboard_page():
         if risk_fig:
             st.plotly_chart(risk_fig, use_container_width=True)
 
-            # Drill-down section
+            # Drill-down section - Intent distribution by risk level
             st.write("---")
             st.write("### 🔍 風險等級詳細分析")
             st.write("選擇風險等級以查看該等級下的意圖分佈")
@@ -296,6 +297,95 @@ def conversation_dashboard_page():
                     st.plotly_chart(drilldown_fig, use_container_width=True)
                 else:
                     st.info("該風險等級下暫無數據")
+
+            # Detailed conversation table by date and risk level
+            st.write("---")
+            st.write("### 📋 對話詳細數據查看")
+            st.write("選擇日期和風險等級查看具體的對話內容和回應時間")
+
+            # Get available dates from filtered data
+            if not filtered_df.empty and 'request_timestamp' in filtered_df.columns:
+                available_dates = sorted(
+                    filtered_df['request_timestamp'].dt.date.unique()
+                )
+
+                col_date, col_risk_filter = st.columns([2, 2])
+
+                with col_date:
+                    selected_date = st.selectbox(
+                        "選擇日期",
+                        options=available_dates,
+                        format_func=lambda x: x.strftime('%Y-%m-%d'),
+                        key="detail_date_select"
+                    )
+
+                with col_risk_filter:
+                    risk_filter_option = st.selectbox(
+                        "篩選風險等級",
+                        options=[
+                            "全部風險等級",
+                            "安全 (<3s)",
+                            "低風險 (3-5s)",
+                            "中風險 (5-8s)",
+                            "高風險 (>8s)"
+                        ],
+                        key="detail_risk_filter"
+                    )
+
+                if selected_date:
+                    # Get selected risk level (None means all levels)
+                    selected_risk_for_table = (
+                        None if risk_filter_option == "全部風險等級"
+                        else risk_filter_option
+                    )
+
+                    # Get detailed table
+                    detail_table = (
+                        st.session_state.visualizer.create_risk_detail_table(
+                            filtered_df,
+                            selected_date,
+                            selected_risk_for_table
+                        )
+                    )
+
+                    if detail_table is not None and not detail_table.empty:
+                        st.write(
+                            f"**查看日期：{selected_date.strftime('%Y-%m-%d')}** | "
+                            f"**風險等級：{risk_filter_option}** | "
+                            f"**共 {len(detail_table)} 筆對話**"
+                        )
+
+                        # Display the table with custom styling
+                        st.dataframe(
+                            detail_table,
+                            use_container_width=True,
+                            height=400,
+                            column_config={
+                                "時間戳": st.column_config.DatetimeColumn(
+                                    "時間戳",
+                                    format="YYYY-MM-DD HH:mm:ss"
+                                ),
+                                "回應耗時 (秒)": st.column_config.NumberColumn(
+                                    "回應耗時 (秒)",
+                                    format="%.3f"
+                                )
+                            }
+                        )
+
+                        # Add download button for the detail table
+                        csv_data = detail_table.to_csv(index=False).encode('utf-8-sig')
+                        st.download_button(
+                            label="📥 下載詳細數據 CSV",
+                            data=csv_data,
+                            file_name=f"risk_detail_{selected_date}_{risk_filter_option}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    else:
+                        st.info(
+                            f"📊 {selected_date.strftime('%Y-%m-%d')} "
+                            f"{risk_filter_option} 無數據"
+                        )
         else:
             st.info("暫無數據")
 
