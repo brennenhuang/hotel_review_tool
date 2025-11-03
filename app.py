@@ -504,10 +504,11 @@ def conversation_dashboard_page():
         if st.button("📥 生成並導出報告", type="primary", use_container_width=True):
             with st.spinner("正在生成報告..."):
                 try:
-                    # Convert timezone if needed
+                    # Convert timezone if needed on filtered data
                     if selected_timezone != "Asia/Taipei":
-                        # Need timezone conversion for data
+                        # Need timezone conversion for filtered data
                         converted_df = st.session_state.data_processor.convert_timezone(
+                            df=filtered_df,  # Convert only filtered data
                             source_timezone="Asia/Taipei",  # Original data timezone (UTC+8)
                             target_timezone=selected_timezone,
                             dst_override=dst_override,
