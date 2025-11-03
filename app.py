@@ -3,6 +3,7 @@ Main Streamlit application for Smart Speaker Conversation Analysis Platform
 智能音箱對話分析平台
 """
 
+import logging
 from datetime import datetime
 
 import streamlit as st
@@ -10,6 +11,13 @@ import streamlit as st
 from data_processor import DataProcessor
 from export_manager import ExportManager
 from visualizations import Visualizer
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 # Page configuration
 st.set_page_config(
@@ -442,7 +450,7 @@ def conversation_dashboard_page():
 
             # 生成動態help文本
             base_help = (
-                "選擇報告中顯示的時區。數據原始時區為UTC+8，選擇UTC將轉換為協調世界時。"
+                "選擇報告中顯示的時區。數據原始時區為UTC，可轉換為其他時區顯示。"
             )
 
             selected_timezone_display = st.selectbox(
@@ -482,7 +490,7 @@ def conversation_dashboard_page():
                 st.caption(f"⏰ **時區狀態:** {timezone_status.strip()}")
 
         # Show timezone info if different timezone is selected
-        if selected_timezone != "Asia/Taipei" and st.session_state.data_loaded:
+        if selected_timezone != "UTC" and st.session_state.data_loaded:
             with st.expander("🌍 時區說明", expanded=True):
                 st.info("📋 **時區轉換說明:**")
                 st.write("• 🏨 **入住/退房時間**: 保持酒店當地時間不變")
@@ -527,11 +535,11 @@ def conversation_dashboard_page():
             with st.spinner("正在生成報告..."):
                 try:
                     # Convert timezone if needed on filtered data
-                    if selected_timezone != "Asia/Taipei":
+                    if selected_timezone != "UTC":
                         # Need timezone conversion for filtered data
                         converted_df = st.session_state.data_processor.convert_timezone(
                             df=filtered_df,  # Convert only filtered data
-                            source_timezone="Asia/Taipei",  # Original data timezone (UTC+8)
+                            source_timezone="UTC",  # Original data timezone (UTC+0)
                             target_timezone=selected_timezone,
                             dst_override=dst_override,
                         )

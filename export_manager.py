@@ -3,10 +3,16 @@ Export manager module for Smart Speaker Conversation Analysis Platform
 Handles conversation export with stay session segmentation
 """
 
+import json
+import logging
 from datetime import datetime, time, timedelta
 from typing import Dict, List, Tuple
 
 import pandas as pd
+
+# Setup logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class ExportManager:
@@ -319,6 +325,116 @@ class ExportManager:
 
         return gap_start, gap_end
 
+    def _extract_alarm_time(self, conv: pd.Series) -> str:
+        """
+        Extract alarm time information from conversation data
+
+        Args:
+            conv: Conversation row as pandas Series
+
+        Returns:
+            Formatted alarm time string or empty string if not applicable
+        """
+        try:
+            # Check if this is an alarm intent
+            user_intent = conv.get("user_intent", "").lower()
+            logger.debug(f"Step 1: user_intent = '{user_intent}'")
+            if user_intent != "alarm":
+                logger.debug("Not an alarm intent, returning empty")
+                return ""
+
+            # Get data field
+            data_field = conv.get("data", None)
+            logger.debug(f"Step 2: data_field exists = {data_field is not None}, is_na = {pd.isna(data_field)}")
+            if pd.isna(data_field) or not data_field:
+                logger.debug("data_field is NA or empty")
+                return ""
+
+            # Parse data JSON
+            logger.debug(f"Step 3: data_field type = {type(data_field)}")
+            if isinstance(data_field, str):
+                try:
+                    data_json = json.loads(data_field)
+                    logger.debug(f"Step 3a: Successfully parsed data_field as JSON, result type = {type(data_json)}")
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"Step 3a: Failed to parse data_field: {e}")
+                    return ""
+            elif isinstance(data_field, dict):
+                data_json = data_field
+                logger.debug("Step 3b: data_field is already a dict")
+            elif isinstance(data_field, list):
+                data_json = data_field
+                logger.debug("Step 3c: data_field is already a list")
+            else:
+                logger.debug(f"Step 3d: data_field is unexpected type: {type(data_field)}")
+                return ""
+
+            # If data_json is a list, extract the first element
+            if isinstance(data_json, list):
+                logger.debug(f"Step 4a: data_json is a list with {len(data_json)} elements")
+                if len(data_json) == 0:
+                    logger.debug("Step 4b: data_json is empty list")
+                    return ""
+                # Take the first element
+                data_json = data_json[0]
+                logger.debug(f"Step 4c: Extracted first element, type = {type(data_json)}")
+
+            # Check if data_json is a dict
+            if not isinstance(data_json, dict):
+                logger.debug(f"Step 5: data_json is {type(data_json)}, not a dict. Skipping.")
+                return ""
+
+            # Check for uni_df_datetime
+            uni_df_datetime = data_json.get("uni_df_datetime", None)
+            logger.debug(f"Step 6: uni_df_datetime exists = {uni_df_datetime is not None}, type = {type(uni_df_datetime) if uni_df_datetime else 'N/A'}")
+            if not uni_df_datetime:
+                logger.debug("uni_df_datetime not found")
+                return ""
+
+            # Parse uni_df_datetime if it's a string
+            if isinstance(uni_df_datetime, str):
+                logger.debug("Step 7: uni_df_datetime is string, parsing...")
+                try:
+                    uni_df_datetime = json.loads(uni_df_datetime)
+                    logger.debug("Step 7a: Successfully parsed uni_df_datetime")
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"Step 7a: Failed to parse uni_df_datetime: {e}")
+                    return ""
+
+            if not isinstance(uni_df_datetime, dict):
+                logger.debug("Step 8: uni_df_datetime is not a dict after parsing")
+                return ""
+
+            # Get startDateTime and endDateTime
+            start_datetime = uni_df_datetime.get("startDateTime", None)
+            end_datetime = uni_df_datetime.get("endDateTime", None)
+            logger.debug(f"Step 9: startDateTime = {start_datetime}, endDateTime = {end_datetime}")
+
+            # Only show if startDateTime equals endDateTime
+            if not start_datetime or not end_datetime or start_datetime != end_datetime:
+                logger.debug("Step 10: Times don't match or are empty")
+                return ""
+
+            # Parse and format the datetime
+            # Expected format: ISO 8601 or similar
+            try:
+                if isinstance(start_datetime, str):
+                    logger.debug(f"Step 11: Parsing datetime string: {start_datetime}")
+                    dt = datetime.fromisoformat(start_datetime.replace('Z', '+00:00'))
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+                    logger.info(f"SUCCESS! Extracted alarm time: {formatted_time}")
+                    return f" alarm_entity:({formatted_time})"
+                else:
+                    logger.debug("Step 11: start_datetime is not a string")
+                    return ""
+            except (ValueError, AttributeError) as e:
+                logger.debug(f"Step 11: Failed to parse datetime: {e}")
+                return ""
+
+        except Exception as e:
+            logger.exception(f"Exception in _extract_alarm_time: {type(e).__name__}: {e}")
+            return ""
+
     def generate_export_text(
         self, sessions: List[Dict], export_date: str = None, target_timezone: str = None
     ) -> str:
@@ -391,9 +507,14 @@ class ExportManager:
                 chatbot_response = conv.get("chatbot_response", "")
                 timecost = conv.get("response_timecost", 0)
 
+                # Extract alarm time information if applicable
+                logger.debug(f"Processing conversation: intent={conv.get('user_intent', 'N/A')}, query={user_query[:50] if user_query else 'N/A'}")
+                alarm_time_info = self._extract_alarm_time(conv)
+                logger.debug(f"Alarm time info result: '{alarm_time_info}'")
+
                 lines.append(f"[{timestamp}], (ID: {conv_id})")
                 lines.append(f"user：{user_query}")
-                lines.append(f"chatbot: {chatbot_response} (思考時間:{timecost:.2f}s)")
+                lines.append(f"chatbot: {chatbot_response}{alarm_time_info} (思考時間:{timecost:.2f}s)")
                 lines.append("")
 
             lines.append("---")

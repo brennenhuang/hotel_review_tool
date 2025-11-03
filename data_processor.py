@@ -24,6 +24,7 @@ class DataProcessor:
         "time": "request_timestamp",
         "final_output.metadata.conversation_id": "conversation_id",
         "final_output.key_entity": "key_entity",
+        "final_output.data": "data",
     }
 
     # Risk level thresholds (in seconds)
@@ -398,8 +399,8 @@ class DataProcessor:
     def convert_timezone(
         self,
         df: Optional[pd.DataFrame] = None,
-        source_timezone: str = "Asia/Taipei",
-        target_timezone: str = "UTC",
+        source_timezone: str = "UTC",
+        target_timezone: str = "Asia/Taipei",
         dst_override: str = None,
     ) -> Optional[pd.DataFrame]:
         """
@@ -407,7 +408,7 @@ class DataProcessor:
 
         Args:
             df: DataFrame to convert (if None, uses self.df)
-            source_timezone: Source timezone (default: Asia/Taipei for UTC+8)
+            source_timezone: Source timezone (default: UTC for UTC+0)
             target_timezone: Target timezone for conversion
             dst_override: 強制選擇模式 ("自動", "強制夏令時", "強制標準時間")
 
@@ -579,8 +580,8 @@ class DataProcessor:
         self,
         time_obj: time,
         date_reference: datetime,
-        source_timezone: str = "Asia/Taipei",
-        target_timezone: str = "UTC",
+        source_timezone: str = "UTC",
+        target_timezone: str = "Asia/Taipei",
     ) -> time:
         """
         Convert a time object from source timezone to target timezone
@@ -588,7 +589,7 @@ class DataProcessor:
         Args:
             time_obj: Time object to convert (e.g., 14:00 for check-in)
             date_reference: Reference date for the conversion
-            source_timezone: Source timezone (default: Asia/Taipei)
+            source_timezone: Source timezone (default: UTC)
             target_timezone: Target timezone for conversion
 
         Returns:
