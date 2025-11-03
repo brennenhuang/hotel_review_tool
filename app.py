@@ -529,17 +529,17 @@ def conversation_upload_page():
                     st.session_state.export_manager = ExportManager()
 
                 # Load and process data
-                success = st.session_state.data_processor.load_data(uploaded_file)
+                success, message = st.session_state.data_processor.load_and_process_csv(uploaded_file)
 
                 if success:
                     st.session_state.conversation_data_loaded = True
                     st.session_state.data_loaded = (
                         True  # Keep for backward compatibility
                     )
-                    st.success("✅ 數據載入成功！")
+                    st.success(f"✅ {message}")
                     st.rerun()
                 else:
-                    st.error("❌ 數據載入失敗，請檢查檔案格式")
+                    st.error(f"❌ {message}")
 
         except Exception as e:
             st.error(f"❌ 處理過程中發生錯誤：{str(e)}")
