@@ -13,7 +13,7 @@ class ExportManager:
     """Manage data export with intelligent stay session segmentation"""
 
     def segment_by_stay_sessions(
-        self, df: pd.DataFrame, checkin_time_str: str, checkout_time_str: str
+        self, df: pd.DataFrame, checkin_time_str: str, checkout_time_str: str, gap_period_mode: str = "合併到下一個住宿時段"
     ) -> List[Dict]:
         """
         Segment conversations by stay sessions
@@ -22,6 +22,10 @@ class ExportManager:
             df: Filtered DataFrame with conversation data
             checkin_time_str: Standard check-in time (e.g., "14:00")
             checkout_time_str: Standard check-out time (e.g., "11:00")
+            gap_period_mode: How to handle gap period conversations (between checkout and checkin)
+                - "合併到下一個住宿時段": Merge into next stay session (default)
+                - "單獨標記為「空檔期」時段": Mark as separate gap period sessions
+                - "不包含空檔期對話": Exclude gap period conversations
 
         Returns:
             List of stay session dictionaries
@@ -44,7 +48,7 @@ class ExportManager:
         for (hotel, room), group_df in df_sorted.groupby(["hotel_name", "room_name"]):
             # Process each room's conversations
             room_sessions = self._segment_room_conversations(
-                group_df, hotel, room, checkin_time, checkout_time
+                group_df, hotel, room, checkin_time, checkout_time, gap_period_mode
             )
             sessions.extend(room_sessions)
 
@@ -57,6 +61,7 @@ class ExportManager:
         room: str,
         checkin_time: time,
         checkout_time: time,
+        gap_period_mode: str = "合併到下一個住宿時段",
     ) -> List[Dict]:
         """
         Segment conversations for a single room into stay sessions
@@ -67,16 +72,31 @@ class ExportManager:
             room: Room name
             checkin_time: Standard check-in time
             checkout_time: Standard check-out time
+            gap_period_mode: How to handle gap period conversations
 
         Returns:
             List of stay session dictionaries
         """
+        # For mode 2, we need to track gap period sessions separately
+        if gap_period_mode == "單獨標記為「空檔期」時段":
+            return self._segment_with_separate_gaps(
+                room_df, hotel, room, checkin_time, checkout_time
+            )
+
+        # For modes 1 and 3, use the simpler approach
         sessions = []
         current_session = None
         current_conversations = []
 
         for _, row in room_df.iterrows():
             timestamp = row["request_timestamp"]
+
+            # Check if conversation is in gap period
+            is_gap = self._is_gap_period(timestamp, checkin_time, checkout_time)
+
+            # Mode 3: Skip gap period conversations
+            if gap_period_mode == "不包含空檔期對話" and is_gap:
+                continue
 
             # Determine if this conversation belongs to current session or starts a new one
             if current_session is None:
@@ -118,6 +138,66 @@ class ExportManager:
                     "conversations": current_conversations,
                 }
             )
+
+        return sessions
+
+    def _segment_with_separate_gaps(
+        self,
+        room_df: pd.DataFrame,
+        hotel: str,
+        room: str,
+        checkin_time: time,
+        checkout_time: time,
+    ) -> List[Dict]:
+        """
+        Segment conversations with gap periods as separate sessions
+
+        Args:
+            room_df: DataFrame of conversations for one room
+            hotel: Hotel name
+            room: Room name
+            checkin_time: Standard check-in time
+            checkout_time: Standard check-out time
+
+        Returns:
+            List of stay session dictionaries including gap period sessions
+        """
+        sessions = []
+
+        for _, row in room_df.iterrows():
+            timestamp = row["request_timestamp"]
+            is_gap = self._is_gap_period(timestamp, checkin_time, checkout_time)
+
+            if is_gap:
+                # Create gap period session for this conversation
+                gap_start, gap_end = self._get_gap_period_boundaries(
+                    timestamp, checkin_time, checkout_time
+                )
+                session_key = (gap_start, gap_end, True)  # True = is_gap_period
+            else:
+                # Create regular stay session
+                session_bounds = self._create_session_boundaries(
+                    timestamp, checkin_time, checkout_time
+                )
+                session_key = (session_bounds["start"], session_bounds["end"], False)
+
+            # Find or create session
+            found = False
+            for session in sessions:
+                if (session["start_time"], session["end_time"], session.get("is_gap_period", False)) == session_key:
+                    session["conversations"].append(row)
+                    found = True
+                    break
+
+            if not found:
+                sessions.append({
+                    "hotel": hotel,
+                    "room": room,
+                    "start_time": session_key[0],
+                    "end_time": session_key[1],
+                    "conversations": [row],
+                    "is_gap_period": session_key[2],
+                })
 
         return sessions
 
@@ -176,6 +256,69 @@ class ExportManager:
         """
         return session["start"] <= timestamp < session["end"]
 
+    def _is_gap_period(self, timestamp: datetime, checkin_time: time, checkout_time: time) -> bool:
+        """
+        Check if a timestamp is in the gap period between checkout and checkin
+
+        Args:
+            timestamp: Conversation timestamp
+            checkin_time: Standard check-in time
+            checkout_time: Standard check-out time
+
+        Returns:
+            True if timestamp is in gap period, False otherwise
+        """
+        conversation_time = timestamp.time()
+
+        # Gap period exists when checkout < checkin (e.g., 11:00 checkout, 14:00 checkin)
+        # Conversation is in gap if its time is between checkout and checkin
+        if checkout_time < checkin_time:
+            return checkout_time <= conversation_time < checkin_time
+        else:
+            # No gap period if checkout >= checkin (unusual case)
+            return False
+
+    def _get_next_checkin_datetime(self, checkout_datetime: datetime, checkin_time: time) -> datetime:
+        """
+        Calculate the next check-in datetime after a checkout
+
+        Args:
+            checkout_datetime: Checkout datetime
+            checkin_time: Standard check-in time
+
+        Returns:
+            Next check-in datetime
+        """
+        # Same day if checkin time is after checkout time
+        if checkin_time > checkout_datetime.time():
+            return datetime.combine(checkout_datetime.date(), checkin_time)
+        else:
+            # Next day if checkin time is before checkout time
+            return datetime.combine(checkout_datetime.date() + timedelta(days=1), checkin_time)
+
+    def _get_gap_period_boundaries(
+        self, timestamp: datetime, checkin_time: time, checkout_time: time
+    ) -> Tuple[datetime, datetime]:
+        """
+        Calculate the gap period boundaries for a given timestamp
+
+        Args:
+            timestamp: A conversation timestamp in the gap period
+            checkin_time: Standard check-in time
+            checkout_time: Standard check-out time
+
+        Returns:
+            Tuple of (gap_start_datetime, gap_end_datetime)
+        """
+        # Gap period is always on the same day as the conversation
+        # Gap starts at checkout time and ends at checkin time
+        conversation_date = timestamp.date()
+
+        gap_start = datetime.combine(conversation_date, checkout_time)
+        gap_end = datetime.combine(conversation_date, checkin_time)
+
+        return gap_start, gap_end
+
     def generate_export_text(
         self, sessions: List[Dict], export_date: str = None, target_timezone: str = None
     ) -> str:
@@ -222,6 +365,7 @@ class ExportManager:
         for i, session in enumerate(sorted_sessions, 1):
             hotel = session["hotel"]
             room = session["room"]
+            is_gap = session.get("is_gap_period", False)
 
             # Use display times if available (for timezone-corrected display)
             if "display_start_time" in session and "display_end_time" in session:
@@ -231,8 +375,12 @@ class ExportManager:
                 start_time = session["start_time"].strftime("%Y-%m-%d %H:%M")
                 end_time = session["end_time"].strftime("%Y-%m-%d %H:%M")
 
-            lines.append(f"## 用戶體驗報告 ({hotel} - {room})")
-            lines.append(f"### 住宿期間：{start_time} ~ {end_time}")
+            if is_gap:
+                lines.append(f"## 用戶體驗報告 ({hotel} - {room}) [空檔期]")
+                lines.append(f"### 空檔期間（退房後到入住前）：{start_time} ~ {end_time}")
+            else:
+                lines.append(f"## 用戶體驗報告 ({hotel} - {room})")
+                lines.append(f"### 住宿期間：{start_time} ~ {end_time}")
             lines.append("")
 
             # Add conversations
@@ -260,6 +408,7 @@ class ExportManager:
         checkout_time: str,
         filename: str = None,
         target_timezone: str = None,
+        gap_period_mode: str = "合併到下一個住宿時段",
     ) -> Tuple[str, str]:
         """
         Complete export workflow
@@ -270,6 +419,7 @@ class ExportManager:
             checkout_time: Check-out time string in target timezone (e.g., "11:00")
             filename: Optional filename
             target_timezone: Target timezone for display (e.g., 'UTC', 'Asia/Taipei')
+            gap_period_mode: How to handle gap period conversations
 
         Returns:
             Tuple of (content: str, filename: str)
@@ -280,7 +430,7 @@ class ExportManager:
 
         # Segment data using appropriate times
         sessions = self.segment_by_stay_sessions(
-            df, segmentation_checkin, segmentation_checkout
+            df, segmentation_checkin, segmentation_checkout, gap_period_mode
         )
 
         # Set display times directly from session times
