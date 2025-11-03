@@ -499,15 +499,38 @@ def conversation_dashboard_page():
                         f"📊 報告時區 ({selected_timezone_display})\n對話時間戳將轉換顯示"
                     )
 
+        # Gap period handling options
+        st.subheader("⏰ 空檔期對話處理")
+        gap_period_mode = st.radio(
+            "選擇空檔期對話（退房後到入住前）的處理方式：",
+            options=[
+                "合併到下一個住宿時段",
+                "單獨標記為「空檔期」時段",
+                "不包含空檔期對話"
+            ],
+            index=0,
+            key="gap_period_mode",
+            help="空檔期是指退房時間到入住時間之間的時段。例如退房11:00到入住14:00之間的對話。"
+        )
+
+        # Show explanation based on selection
+        if gap_period_mode == "合併到下一個住宿時段":
+            st.caption("💡 空檔期的對話將歸入即將開始的住宿時段（預設行為）")
+        elif gap_period_mode == "單獨標記為「空檔期」時段":
+            st.caption("💡 空檔期的對話將單獨顯示為一個獨立時段，方便識別異常使用")
+        else:
+            st.caption("💡 空檔期的對話將從報告中排除，只顯示正常住宿期間的對話")
+
         st.write("---")
 
         if st.button("📥 生成並導出報告", type="primary", use_container_width=True):
             with st.spinner("正在生成報告..."):
                 try:
-                    # Convert timezone if needed
+                    # Convert timezone if needed on filtered data
                     if selected_timezone != "Asia/Taipei":
-                        # Need timezone conversion for data
+                        # Need timezone conversion for filtered data
                         converted_df = st.session_state.data_processor.convert_timezone(
+                            df=filtered_df,  # Convert only filtered data
                             source_timezone="Asia/Taipei",  # Original data timezone (UTC+8)
                             target_timezone=selected_timezone,
                             dst_override=dst_override,
@@ -529,6 +552,7 @@ def conversation_dashboard_page():
                         checkin_str,
                         checkout_str,
                         target_timezone=selected_timezone,
+                        gap_period_mode=gap_period_mode,
                     )
 
                     st.success(
