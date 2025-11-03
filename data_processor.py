@@ -397,6 +397,7 @@ class DataProcessor:
 
     def convert_timezone(
         self,
+        df: Optional[pd.DataFrame] = None,
         source_timezone: str = "Asia/Taipei",
         target_timezone: str = "UTC",
         dst_override: str = None,
@@ -405,6 +406,7 @@ class DataProcessor:
         Convert timestamps from source timezone to target timezone
 
         Args:
+            df: DataFrame to convert (if None, uses self.df)
             source_timezone: Source timezone (default: Asia/Taipei for UTC+8)
             target_timezone: Target timezone for conversion
             dst_override: 強制選擇模式 ("自動", "強制夏令時", "強制標準時間")
@@ -412,10 +414,13 @@ class DataProcessor:
         Returns:
             DataFrame with converted timestamps, or None if no data
         """
-        if self.df is None:
+        # Use provided DataFrame or fall back to self.df
+        source_df = df if df is not None else self.df
+
+        if source_df is None:
             return None
 
-        df_converted = self.df.copy()
+        df_converted = source_df.copy()
 
         try:
             # Define timezones
@@ -433,7 +438,7 @@ class DataProcessor:
 
         except Exception as e:
             print(f"Timezone conversion error: {e}")
-            return self.df.copy()
+            return source_df.copy()
 
     def _convert_single_timestamp(self, timestamp, source_tz, target_tz) -> datetime:
         """
