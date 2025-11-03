@@ -83,6 +83,15 @@ class Visualizer:
         # Count by date and risk level
         risk_by_date = df_copy.groupby(['date', 'risk_level']).size().reset_index(name='count')
 
+        # Calculate total count per date for percentage calculation
+        date_totals = risk_by_date.groupby('date')['count'].sum().to_dict()
+
+        # Add percentage column
+        risk_by_date['percentage'] = risk_by_date.apply(
+            lambda row: (row['count'] / date_totals[row['date']]) * 100,
+            axis=1
+        )
+
         # Define risk level order
         risk_order = ['安全 (<3s)', '低風險 (3-5s)', '中風險 (5-8s)', '高風險 (>8s)']
         risk_colors = {
@@ -97,12 +106,23 @@ class Visualizer:
 
         for risk_level in risk_order:
             risk_data = risk_by_date[risk_by_date['risk_level'] == risk_level]
+
+            # Create text labels with percentage
+            text_labels = [
+                f'{count} ({pct:.1f}%)'
+                for count, pct in zip(risk_data['count'], risk_data['percentage'])
+            ]
+
             fig.add_trace(go.Bar(
                 x=risk_data['date'],
                 y=risk_data['count'],
                 name=risk_level,
                 marker_color=risk_colors.get(risk_level, '#gray'),
-                hovertemplate='<b>%{x}</b><br>%{fullData.name}<br>數量: %{y}<extra></extra>'
+                text=text_labels,
+                textposition='inside',
+                textfont=dict(color='white', size=12),
+                hovertemplate='<b>%{x}</b><br>%{fullData.name}<br>數量: %{y}<br>佔比: %{customdata:.1f}%<extra></extra>',
+                customdata=risk_data['percentage']
             ))
 
         fig.update_layout(
@@ -118,7 +138,8 @@ class Visualizer:
                 y=1.02,
                 xanchor="right",
                 x=1
-            )
+            ),
+            uniformtext=dict(mode='hide', minsize=8)
         )
 
         return fig
